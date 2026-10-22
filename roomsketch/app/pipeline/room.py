@@ -14,6 +14,7 @@ from typing import Callable
 import numpy as np
 import shapely
 from scipy import ndimage
+from scipy.spatial import cKDTree
 from shapely.geometry import LineString, MultiPolygon, Polygon, box
 from shapely.geometry.polygon import orient
 from shapely.ops import polygonize, unary_union
@@ -43,8 +44,14 @@ def extract_room(points: np.ndarray, normals: np.ndarray | None = None, *, spars
     if nrm is None:
         nrm = pca_n
     spacing = max(spacing, 0.005)
-
     dist = float(np.clip(2.5 * spacing, 0.02, 0.06))
+    if sparse:
+        # SfM points cluster on texture, so nearest-neighbour spacing understates the gaps.
+        # Use the mean spacing implied by local density instead: r_k ~ sqrt(k / (pi * rho)).
+        k = 8
+        rk, _ = cKDTree(pts).query(pts, k=k + 1, workers=-1)
+        spacing = max(spacing, float(np.median(rk[:, k])) * np.sqrt(np.pi / k))
+        dist = max(dist, 0.03)
     cell = float(max(0.05, 3.0 * spacing))
     min_inliers = int(np.clip(0.12 / spacing**2, 25, 400))
 

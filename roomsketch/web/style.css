@@ -34,7 +34,6 @@ h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
 .card:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
 .card.ghost { border-style: dashed; box-shadow: none; }
 .card.disabled { opacity: .45; pointer-events: none; box-shadow: none; }
-#pg-note { margin: 12px 2px 0; }
 .card-k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
 .card-t { font-size: 18px; font-weight: 650; }
 .card-d { color: var(--ink-2); font-size: 14px; }

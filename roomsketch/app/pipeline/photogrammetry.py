@@ -182,18 +182,18 @@ def _rotation_to_z(v: np.ndarray) -> np.ndarray:
 
 
 def detect_markers(img) -> dict[int, np.ndarray]:
-    detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICT),
-                                       cv2.aruco.DetectorParameters())
+    params = cv2.aruco.DetectorParameters()
+    # AprilTag-style edge refinement gives unbiased corners; cornerSubPix (made for
+    # checkerboard X-corners) pulls marker corners inwards and inflates scale ~0.3%.
+    params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_APRILTAG
+    detector = cv2.aruco.ArucoDetector(cv2.aruco.getPredefinedDictionary(ARUCO_DICT), params)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     corners, ids, _ = detector.detectMarkers(gray)
     out = {}
     if ids is None:
         return out
     for c, i in zip(corners, ids.ravel()):
-        c = c.reshape(4, 2).astype(np.float32)
-        cv2.cornerSubPix(gray, c, (5, 5), (-1, -1),
-                         (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.01))
-        out[int(i)] = c.astype(float)
+        out[int(i)] = c.reshape(4, 2).astype(float)
     return out
 
 

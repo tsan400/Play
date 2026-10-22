@@ -1,6 +1,8 @@
 import { Capture } from './capture.js';
 import { RoomViewer, fmtLen } from './viewer.js';
 import { loadScan, packUpload } from './scanload.js';
+import { reconstructPhotos } from './sfm/client.js';
+import { framesFromVideo, focal35FromExif } from './sfm/media.js';
 
 const $ = s => document.querySelector(s);
 const screens = ['home', 'capture', 'processing', 'viewer'];
@@ -48,7 +50,7 @@ async function route() {
   if (m) return openRoom(m[1]);
   m = h.match(/^#\/job\/([a-f0-9]+)/);
   if (m) return pollJob(m[1]);
-  if (h === '#/capture' && config.photogrammetry) return startCapture();
+  if (h === '#/capture') return startCapture();
   show('home');
   renderRecent();
 }
@@ -145,8 +147,13 @@ document.querySelector('[data-action="demo"]').addEventListener('click', async (
   }
 });
 
-// ---- Photogrammetry (only when the server has COLMAP) -----------------------------
-function uploadPhotos(form, label) {
+// ---- Photogrammetry ---------------------------------------------------------------
+// Default: structure-from-motion runs on this device (web/sfm/) and only the sparse
+// point cloud is uploaded. Optional: server COLMAP when the server has it installed.
+const useServerColmap = () => config.photogrammetry && $('#pg-server').checked;
+const markerSizeM = () => (parseFloat($('#marker-cm').value) || 0) / 100;
+
+function uploadPhotosToServer(form, label) {
   busy('Uploading…', '', 0);
   post('/api/photos', form, {
     onUpload: (p, e) => {
@@ -159,15 +166,63 @@ function uploadPhotos(form, label) {
   }).catch(err => fail(err.message));
 }
 
-$('#media-file').addEventListener('change', e => {
+async function photosOnDevice(sources, label, focalFactor = 0.75) {
+  try {
+    busy('Reconstructing on this device', 'Loading vision engine…', 0);
+    const res = await reconstructPhotos(sources, { markerSizeM: markerSizeM(), focalFactor }, (f, msg) => {
+      $('#proc-bar').style.width = (f * 100).toFixed(0) + '%';
+      $('#proc-msg').textContent = msg;
+    });
+    const n = res.points.length / 3;
+    busy('Solving room', `${n.toLocaleString()} points from ${res.info.registered}/${res.info.images} photos`);
+    const meta = encodeURIComponent(JSON.stringify(res.info));
+    const out = await post(`/api/room?source=photogrammetry&meta=${meta}`, packUpload({ count: n, pts: res.points, nrm: null }),
+      { type: 'application/octet-stream' });
+    saveRoom(out.room, label, transformPoints(res.points, out.room.input_transform));
+  } catch (err) {
+    fail(err.message || String(err));
+  }
+}
+
+function transformPoints(P, T) {
+  const out = new Float32Array(P.length);
+  for (let i = 0; i < P.length; i += 3) {
+    const x = P[i], y = P[i + 1], z = P[i + 2];
+    out[i] = T[0][0] * x + T[0][1] * y + T[0][2] * z + T[0][3];
+    out[i + 1] = T[1][0] * x + T[1][1] * y + T[1][2] * z + T[1][3];
+    out[i + 2] = T[2][0] * x + T[2][1] * y + T[2][2] * z + T[2][3];
+  }
+  return out;
+}
+
+$('#media-file').addEventListener('change', async e => {
   const files = [...e.target.files];
   e.target.value = '';
   if (!files.length) return;
-  const form = new FormData();
-  files.forEach(f => form.append('files', f, f.name));
-  form.append('marker_cm', $('#marker-cm').value || '0');
-  const video = files.some(f => f.type.startsWith('video'));
-  uploadPhotos(form, video ? 'Photogrammetry · video' : `Photogrammetry · ${files.length} photos`);
+  const video = files.find(f => f.type.startsWith('video'));
+  const label = video ? 'Photogrammetry · video' : `Photogrammetry · ${files.length} photos`;
+  if (useServerColmap()) {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f, f.name));
+    form.append('marker_cm', $('#marker-cm').value || '0');
+    return uploadPhotosToServer(form, label);
+  }
+  try {
+    if (video) {
+      busy('Reading video', video.name, 0);
+      const frames = await framesFromVideo(video, {}, (f, msg) => {
+        $('#proc-bar').style.width = (f * 100).toFixed(0) + '%';
+        $('#proc-msg').textContent = msg;
+      });
+      return photosOnDevice(frames, label, 0.8); // video modes crop for stabilisation
+    }
+    const photos = files.filter(f => f.type.startsWith('image') || /\.(jpe?g|png|heic|webp)$/i.test(f.name))
+      .sort((a, b) => a.lastModified - b.lastModified || a.name.localeCompare(b.name));
+    const sources = await Promise.all(photos.map(async f => ({ blob: f, name: f.name, focal35: await focal35FromExif(f) })));
+    photosOnDevice(sources, label);
+  } catch (err) {
+    fail(err.message || String(err));
+  }
 });
 
 let pollToken = 0;
@@ -224,16 +279,20 @@ $('#cap-rec').addEventListener('click', () => {
 });
 $('#cap-shutter').addEventListener('click', () => capture.snap());
 $('#cap-done').addEventListener('click', () => {
-  const form = new FormData();
-  capture.frames.forEach((f, i) => form.append('files', f.blob, `frame_${String(i).padStart(4, '0')}.jpg`));
-  form.append('marker_cm', $('#marker-cm').value || '0');
-  const n = capture.frames.length;
+  const frames = capture.frames.map((f, i) => ({ blob: f.blob, name: `frame_${String(i).padStart(4, '0')}.jpg` }));
+  const label = `Camera capture · ${frames.length} photos`;
   capture.stop();
   capture.reset();
   $('#cap-strip').innerHTML = '';
   $('#cap-count').textContent = '0';
   $('#cap-rec').classList.remove('on');
-  uploadPhotos(form, `Camera capture · ${n} photos`);
+  if (useServerColmap()) {
+    const form = new FormData();
+    frames.forEach(f => form.append('files', f.blob, f.name));
+    form.append('marker_cm', $('#marker-cm').value || '0');
+    return uploadPhotosToServer(form, label);
+  }
+  photosOnDevice(frames, label);
 });
 
 // ---- Viewer ------------------------------------------------------------------------
@@ -358,15 +417,6 @@ function bindViewerUI() {
 // ---- Boot ----------------------------------------------------------------------------
 (async () => {
   try { config = await fetch('/api/config').then(r => r.json()); } catch { /* offline: keep defaults */ }
-  if (!config.photogrammetry) {
-    for (const el of document.querySelectorAll('.needs-photogrammetry')) {
-      el.classList.add('disabled');
-      el.setAttribute('aria-disabled', 'true');
-      el.querySelector('.card-k').textContent = 'Photogrammetry · local server only';
-      el.querySelector('input')?.setAttribute('disabled', '');
-    }
-    $('#pg-note').classList.remove('hidden');
-    $('.cards').prepend($('label[for="scan-file"]')); // LiDAR is the primary path here
-  }
+  $('#pg-server-row').classList.toggle('hidden', !config.photogrammetry);
   route();
 })();

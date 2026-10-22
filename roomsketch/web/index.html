@@ -30,10 +30,10 @@
     </header>
 
     <div class="cards">
-      <button class="card needs-photogrammetry" data-go="capture">
+      <button class="card" data-go="capture">
         <span class="card-k">Photogrammetry</span>
         <span class="card-t">Capture with camera</span>
-        <span class="card-d">Walk the room slowly while the app snaps overlapping photos. Works on any phone. Place the printed marker for true scale.</span>
+        <span class="card-d">Walk the room slowly while the app snaps overlapping photos. Works on any phone; the 3D solve runs on the phone itself. Place the printed marker for true scale.</span>
       </button>
       <label class="card" for="scan-file">
         <span class="card-k">LiDAR · most accurate</span>
@@ -41,7 +41,7 @@
         <span class="card-d">Scan with a LiDAR app (3D Scanner App, Polycam, Scaniverse) on an iPhone Pro, export <b>PLY / OBJ / GLB</b>, and open it here.</span>
         <input id="scan-file" type="file" accept=".ply,.obj,.glb,.gltf,.stl,.xyz,.pts,.txt,.csv" hidden>
       </label>
-      <label class="card needs-photogrammetry" for="media-file">
+      <label class="card" for="media-file">
         <span class="card-k">Photogrammetry</span>
         <span class="card-t">Upload photos or a video</span>
         <span class="card-d">Pick 40–150 overlapping photos, or one slow walkthrough video, from your library.</span>
@@ -52,8 +52,6 @@
         <span class="card-d">Runs the full pipeline on a synthetic LiDAR scan of an L-shaped room.</span>
       </button>
     </div>
-
-    <p id="pg-note" class="muted small hidden">Photogrammetry needs the COLMAP worker, so it runs on the local or Docker server (see README). This hosted version handles LiDAR scans, the demo, the viewer and exports.</p>
 
     <details class="opts">
       <summary>Options</summary>
@@ -68,6 +66,9 @@
       </label>
       <label class="row">Scale marker size (cm)
         <input id="marker-cm" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 15.0">
+      </label>
+      <label class="row hidden" id="pg-server-row">Process photos on the server (COLMAP)
+        <input id="pg-server" type="checkbox">
       </label>
       <a class="link" href="marker.html" target="_blank">Print the scale marker →</a>
     </details>

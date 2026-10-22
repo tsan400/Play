@@ -2,8 +2,9 @@
 
 The room endpoints are stateless (the browser keeps the solved room JSON and
 sends it back for models/exports), so they run unchanged on serverless hosts
-such as Vercel. Photogrammetry needs COLMAP + OpenCV and a long-running worker;
-it is enabled only when those are installed (local / Docker server).
+such as Vercel. Photogrammetry runs in the browser (web/sfm/) and uploads only
+the resulting sparse cloud; the optional server COLMAP path (/api/photos) is
+enabled only when COLMAP + OpenCV are installed (local / Docker server).
 """
 from __future__ import annotations
 
@@ -56,14 +57,26 @@ def config():
 # ---------------------------------------------------------------------------------
 
 @app.post("/api/room")
-async def solve_room(request: Request, up: str = Query("auto"), name: str = Query("scan")):
-    """LiDAR path. Body: uint32 count, count*3 float32 xyz, optional count*3 int8 normals.
+async def solve_room(request: Request, up: str = Query("auto"), name: str = Query("scan"),
+                     source: str = Query("lidar"), meta: str = Query("{}")):
+    """Body: uint32 count, count*3 float32 xyz, optional count*3 int8 normals.
 
-    The browser parses the scan export and voxel-downsamples it first, so the
-    upload stays small (a few MB) whatever the size of the original file.
+    source=lidar: a scan export the browser parsed and voxel-thinned (any size file
+    becomes a few MB). source=photogrammetry: the sparse, metric, Z-up cloud from
+    the in-browser structure-from-motion, with its report in `meta` (JSON).
     """
     if up not in {"auto", "y", "-y", "z", "-z", "x", "-x"}:
         raise HTTPException(400, "Invalid up axis")
+    if source not in {"lidar", "photogrammetry"}:
+        raise HTTPException(400, "Invalid source")
+    if len(meta) > 8000:
+        raise HTTPException(400, "Meta too large")
+    try:
+        client_meta = json.loads(meta)
+        if not isinstance(client_meta, dict):
+            raise ValueError
+    except ValueError:
+        raise HTTPException(400, "Invalid meta")
     body = await request.body()
     if len(body) < 4:
         raise HTTPException(400, "Empty upload")
@@ -81,14 +94,21 @@ async def solve_room(request: Request, up: str = Query("auto"), name: str = Quer
     if not np.isfinite(pts).all():
         raise HTTPException(400, "Points contain NaN/Inf")
 
-    axis = detect_up_axis(pts) if up == "auto" else up
+    sparse = source == "photogrammetry"
+    axis = "z" if sparse else (detect_up_axis(pts) if up == "auto" else up)
     zpts, znrm = to_z_up(pts, axis, nrm)
     try:
-        room = extract_room(zpts, znrm)
+        room = extract_room(zpts, znrm, sparse=sparse)
     except ValueError as e:
         raise HTTPException(422, str(e))
-    room["meta"] = {"source": "lidar", "file": name[:120], "up_axis": axis, "scaled": True,
-                    "scale_source": "LiDAR (metric)"}
+    if sparse:
+        scaled = bool(client_meta.get("scaled"))
+        room["meta"] = {"source": "photogrammetry", "scaled": scaled,
+                        "scale_source": str(client_meta.get("scale_source", ""))[:120],
+                        "photogrammetry": client_meta, "processed": "browser"}
+    else:
+        room["meta"] = {"source": "lidar", "file": name[:120], "up_axis": axis, "scaled": True,
+                        "scale_source": "LiDAR (metric)"}
     # Raw file axes -> model frame, so the browser can overlay its own copy of the points.
     T = np.array(room["transform"])
     R = np.eye(4)
@@ -197,7 +217,7 @@ async def room_export(request: Request):
 
 def _need_photogrammetry():
     if not PHOTOGRAMMETRY:
-        raise HTTPException(501, "Photogrammetry runs on the local/Docker server (needs COLMAP + OpenCV).")
+        raise HTTPException(501, "Server-side COLMAP is not installed here; photogrammetry runs in the browser.")
 
 
 async def _save(upload: UploadFile, dest: Path) -> Path:
