@@ -1,0 +1,7 @@
+.venv
+data
+certs
+tests
+docs
+.pytest_cache
+**/__pycache__

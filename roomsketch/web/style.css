@@ -33,6 +33,8 @@ h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
   cursor: pointer; box-shadow: 4px 4px 0 var(--ink); transition: transform .08s, box-shadow .08s; }
 .card:active { transform: translate(3px, 3px); box-shadow: 1px 1px 0 var(--ink); }
 .card.ghost { border-style: dashed; box-shadow: none; }
+.card.disabled { opacity: .45; pointer-events: none; box-shadow: none; }
+#pg-note { margin: 12px 2px 0; }
 .card-k { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
 .card-t { font-size: 18px; font-weight: 650; }
 .card-d { color: var(--ink-2); font-size: 14px; }
@@ -79,6 +81,8 @@ button.icon { width: 40px; height: 40px; border-radius: 50%; border: 1px solid v
 .proc { max-width: 420px; margin: 0 auto; padding: 30vh 24px 0; text-align: center; }
 .bar { height: 6px; background: var(--panel); border-radius: 3px; overflow: hidden; margin: 16px 0 8px; }
 #proc-bar { height: 100%; width: 0; background: var(--ink); transition: width .3s; }
+#proc-bar.indeterminate { width: 35% !important; animation: slide 1.2s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
 .spinner { width: 36px; height: 36px; margin: 0 auto 12px; border: 3px solid var(--line); border-top-color: var(--ink);
   border-radius: 50%; animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }

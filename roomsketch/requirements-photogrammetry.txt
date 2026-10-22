@@ -1,0 +1,3 @@
+# Photogrammetry worker (local / Docker server): COLMAP SfM + ArUco detection.
+opencv-python-headless==5.0.0.93
+pycolmap==4.2.1

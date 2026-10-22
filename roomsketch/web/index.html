@@ -30,7 +30,7 @@
     </header>
 
     <div class="cards">
-      <button class="card" data-go="capture">
+      <button class="card needs-photogrammetry" data-go="capture">
         <span class="card-k">Photogrammetry</span>
         <span class="card-t">Capture with camera</span>
         <span class="card-d">Walk the room slowly while the app snaps overlapping photos. Works on any phone. Place the printed marker for true scale.</span>
@@ -41,7 +41,7 @@
         <span class="card-d">Scan with a LiDAR app (3D Scanner App, Polycam, Scaniverse) on an iPhone Pro, export <b>PLY / OBJ / GLB</b>, and open it here.</span>
         <input id="scan-file" type="file" accept=".ply,.obj,.glb,.gltf,.stl,.xyz,.pts,.txt,.csv" hidden>
       </label>
-      <label class="card" for="media-file">
+      <label class="card needs-photogrammetry" for="media-file">
         <span class="card-k">Photogrammetry</span>
         <span class="card-t">Upload photos or a video</span>
         <span class="card-d">Pick 40–150 overlapping photos, or one slow walkthrough video, from your library.</span>
@@ -52,6 +52,8 @@
         <span class="card-d">Runs the full pipeline on a synthetic LiDAR scan of an L-shaped room.</span>
       </button>
     </div>
+
+    <p id="pg-note" class="muted small hidden">Photogrammetry needs the COLMAP worker, so it runs on the local or Docker server (see README). This hosted version handles LiDAR scans, the demo, the viewer and exports.</p>
 
     <details class="opts">
       <summary>Options</summary>
@@ -143,11 +145,11 @@
         <button class="secondary" id="v-calibrate">Calibrate scale</button>
         <div class="export">
           <span class="muted small">Export</span>
-          <a class="btn" data-fmt="rb" title="SketchUp Ruby script: exact faces, grouped & tagged">SketchUp .rb</a>
-          <a class="btn" data-fmt="dae" title="Collada: imports in every SketchUp version">.dae</a>
-          <a class="btn" data-fmt="dxf" title="DXF R12: 3D faces + line work">.dxf</a>
-          <a class="btn" data-fmt="obj">.obj</a>
-          <a class="btn" data-fmt="svg" title="Dimensioned floor plan">Plan .svg</a>
+          <a class="btn" href="#" data-fmt="rb" title="SketchUp Ruby script: exact faces, grouped & tagged">SketchUp .rb</a>
+          <a class="btn" href="#" data-fmt="dae" title="Collada: imports in every SketchUp version">.dae</a>
+          <a class="btn" href="#" data-fmt="dxf" title="DXF R12: 3D faces + line work">.dxf</a>
+          <a class="btn" href="#" data-fmt="obj">.obj</a>
+          <a class="btn" href="#" data-fmt="svg" title="Dimensioned floor plan">Plan .svg</a>
         </div>
       </div>
     </div>

@@ -43,6 +43,18 @@ Mobile Safari only allows camera access over HTTPS. Alternatives to the self-sig
 docker build -t roomsketch . && docker run -p 8000:8000 -v roomsketch-data:/data roomsketch
 ```
 
+### Hosted on Vercel
+
+`vercel.json` deploys this folder as static files (`web/`) plus one Python function (`api/index.py`).
+The room API is stateless: the browser parses the scan and thins it to 2.5 cm points before
+uploading (a 200 MB export becomes a 2–4 MB request, inside the serverless body limit), then keeps the
+solved room JSON in `localStorage` and posts it back for models and exports. Photogrammetry is turned off
+there, because COLMAP and OpenCV don't fit a serverless bundle and a run takes minutes. Use the local or
+Docker server for it.
+
+Requirements are split: `requirements.txt` (core, all Vercel installs), `requirements-photogrammetry.txt`
+(OpenCV + pycolmap), `requirements-dev.txt` (everything, plus test tools).
+
 Tests: `pip install -r requirements-dev.txt && pytest`. The end-to-end photogrammetry test renders a
 textured room with a marker and runs COLMAP (~4 min): `ROOMSKETCH_SLOW=1 pytest -k photogrammetry`.
 
@@ -91,4 +103,5 @@ Exports follow the viewer's layer toggles (ceiling and furniture) and any scale 
 - One room per scan; walls must be planar (curved walls get faceted or dropped); sloped ceilings become flat.
 - Openings are rectangles. Something hiding the wall that is not detected as an occluder can still read as a door.
 - Furniture is LOD1 boxes: clutter that touches gets merged into one box.
-- Jobs are processed one at a time, and stored on disk under `data/` with no authentication. It is a local prototype server.
+- Photogrammetry jobs are processed one at a time and stored on disk under `data/`, with no authentication. It is a local prototype server.
+- Saved rooms live in the browser that made them (`localStorage`); the scan-point overlay lasts only for the session that imported the scan.

@@ -14,7 +14,7 @@ import numpy as np
 
 from .pipeline.room import extract_room
 
-MAX_OVERLAY_POINTS = 120_000
+MAX_OVERLAY_POINTS = 60_000  # keeps JSON responses well under serverless body limits
 
 
 class Jobs:
@@ -71,17 +71,21 @@ class Jobs:
         self.pool.submit(run)
 
 
+def overlay_points(pts: np.ndarray, transform, limit: int = MAX_OVERLAY_POINTS) -> np.ndarray:
+    """Random subset of `pts` moved into the room's model frame (float32)."""
+    T = np.asarray(transform, float)
+    P = pts
+    if len(P) > limit:
+        P = P[np.random.default_rng(0).choice(len(P), limit, replace=False)]
+    return (P @ T[:3, :3].T + T[:3, 3]).astype("<f4")
+
+
 def solve_and_save(job_dir: Path, pts: np.ndarray, normals, *, sparse: bool, meta: dict,
                    progress: Callable[[float, str], None], lo: float = 0.0, hi: float = 1.0) -> dict:
     """Run room extraction and persist room.json + overlay points (model frame)."""
     sub = lambda f, m: progress(lo + (hi - lo) * f, m)
     room = extract_room(pts, normals, sparse=sparse, progress=sub)
     room["meta"] = meta
-    T = np.array(room["transform"])
-    P = pts
-    if len(P) > MAX_OVERLAY_POINTS:
-        P = P[np.random.default_rng(0).choice(len(P), MAX_OVERLAY_POINTS, replace=False)]
-    P = P @ T[:3, :3].T + T[:3, 3]
-    (job_dir / "points.bin").write_bytes(P.astype("<f4").tobytes())
+    (job_dir / "points.bin").write_bytes(overlay_points(pts, room["transform"]).tobytes())
     (job_dir / "room.json").write_text(json.dumps(room))
     return room

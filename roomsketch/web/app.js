@@ -1,78 +1,72 @@
 import { Capture } from './capture.js';
 import { RoomViewer, fmtLen } from './viewer.js';
+import { loadScan, packUpload } from './scanload.js';
 
 const $ = s => document.querySelector(s);
 const screens = ['home', 'capture', 'processing', 'viewer'];
 let capture = null;
 let viewer = null;
-let current = { id: null, scale: 1 };
+let config = { photogrammetry: false };
+// The solved room lives in the browser; the server is stateless.
+let current = { id: null, room: null, points: null, scale: 1 };
 
 function show(name) {
   screens.forEach(s => $('#' + s).classList.toggle('hidden', s !== name));
-  if (name !== 'capture' && capture) { capture.stop(); }
+  if (name !== 'capture' && capture) capture.stop();
 }
 
 // ---- Persistence (per-device conveniences only) ---------------------------------
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
-  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode */ } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch { return false; } },
 };
-function remember(id, label) {
-  const list = store.get('rs.recent', []).filter(r => r.id !== id);
+const newId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+
+function saveRoom(room, label, points) {
+  const id = newId();
+  // Rooms are a few KB; overlay points stay in memory for this session only.
+  store.set('rs.room.' + id, room);
+  const list = store.get('rs.recent', []).filter(r => store.get('rs.room.' + r.id, null));
   list.unshift({ id, label, t: Date.now() });
-  store.set('rs.recent', list.slice(0, 8));
+  for (const old of list.slice(10)) { try { localStorage.removeItem('rs.room.' + old.id); } catch { /* ignore */ } }
+  store.set('rs.recent', list.slice(0, 10));
+  current = { id, room, points, scale: 1 };
+  location.hash = '#/room/' + id;
 }
+
 function renderRecent() {
   const list = store.get('rs.recent', []);
-  $('#recent').innerHTML = list.length ? '<div class="muted small">Recent</div>' + list.map(r =>
-    `<a href="#/job/${r.id}">${r.label} <span class="muted small">· ${new Date(r.t).toLocaleString()}</span></a>`).join('') : '';
+  $('#recent').innerHTML = list.length ? '<div class="muted small">Recent (this device)</div>' + list.map(r =>
+    `<a href="#/room/${r.id}">${escapeHtml(r.label)} <span class="muted small">· ${new Date(r.t).toLocaleString()}</span></a>`).join('') : '';
 }
+const escapeHtml = s => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // ---- Routing -----------------------------------------------------------------------
 async function route() {
   const h = location.hash;
-  const m = h.match(/^#\/job\/([a-f0-9]+)/);
-  if (m) return openJob(m[1]);
-  if (h === '#/capture') return startCapture();
+  let m = h.match(/^#\/room\/([a-z0-9]+)/);
+  if (m) return openRoom(m[1]);
+  m = h.match(/^#\/job\/([a-f0-9]+)/);
+  if (m) return pollJob(m[1]);
+  if (h === '#/capture' && config.photogrammetry) return startCapture();
   show('home');
   renderRecent();
 }
 window.addEventListener('hashchange', route);
 document.addEventListener('click', e => {
   const go = e.target.closest('[data-go]');
-  if (go) { e.preventDefault(); location.hash = go.dataset.go === 'home' ? '' : '#/' + go.dataset.go; }
+  if (go && !go.classList.contains('disabled')) { e.preventDefault(); location.hash = go.dataset.go === 'home' ? '' : '#/' + go.dataset.go; }
 });
 
-// ---- Uploads -----------------------------------------------------------------------
-function upload(url, form, label) {
+// ---- Processing screen helpers ---------------------------------------------------
+function busy(title, msg = '', pct = null) {
   show('processing');
-  $('#proc-title').textContent = 'Uploading…';
+  $('#proc-title').textContent = title;
+  $('#proc-msg').textContent = msg;
   $('#proc-err').classList.add('hidden');
   $('#proc-back').classList.add('hidden');
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', url);
-    xhr.upload.onprogress = e => {
-      if (e.lengthComputable) {
-        $('#proc-bar').style.width = (e.loaded / e.total * 100).toFixed(1) + '%';
-        $('#proc-msg').textContent = `${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
-      }
-    };
-    xhr.onload = () => {
-      let body = {};
-      try { body = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
-      if (xhr.status >= 200 && xhr.status < 300) {
-        remember(body.id, label);
-        location.hash = '#/job/' + body.id;
-        resolve(body.id);
-      } else {
-        fail(body.detail || `Upload failed (${xhr.status})`);
-        reject();
-      }
-    };
-    xhr.onerror = () => { fail('Network error during upload'); reject(); };
-    xhr.send(form);
-  });
+  $('#proc-bar').style.width = pct == null ? '100%' : pct + '%';
+  $('#proc-bar').classList.toggle('indeterminate', pct == null);
 }
 
 function fail(msg) {
@@ -81,40 +75,123 @@ function fail(msg) {
   $('#proc-err').textContent = msg;
   $('#proc-err').classList.remove('hidden');
   $('#proc-back').classList.remove('hidden');
+  $('#proc-bar').classList.remove('indeterminate');
 }
 
-$('#scan-file').addEventListener('change', e => {
+function post(url, body, { onUpload, type } = {}) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    if (type) xhr.setRequestHeader('Content-Type', type);
+    if (onUpload) xhr.upload.onprogress = e => e.lengthComputable && onUpload(e.loaded / e.total, e);
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(data);
+      else reject(new Error(data.detail || `Request failed (${xhr.status})`));
+    };
+    xhr.onerror = () => reject(new Error('Network error'));
+    xhr.send(body);
+  });
+}
+
+const b64ToFloats = b64 => {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Float32Array(bytes.buffer);
+};
+
+// ---- LiDAR import ----------------------------------------------------------------
+$('#scan-file').addEventListener('change', async e => {
   const f = e.target.files[0];
-  if (!f) return;
-  const form = new FormData();
-  form.append('file', f);
-  form.append('up', $('#up-axis').value);
-  upload('/api/scan', form, `LiDAR · ${f.name}`);
   e.target.value = '';
+  if (!f) return;
+  try {
+    busy('Reading scan', f.name);
+    const scan = await loadScan(f, m => { $('#proc-msg').textContent = m; });
+    const body = packUpload(scan);
+    busy('Uploading', `${scan.count.toLocaleString()} points · ${(body.size / 1e6).toFixed(1)} MB`, 0);
+    const up = $('#up-axis').value;
+    const res = await post(`/api/room?up=${up}&name=${encodeURIComponent(f.name)}`, body, {
+      type: 'application/octet-stream',
+      onUpload: p => {
+        $('#proc-bar').style.width = (p * 100).toFixed(0) + '%';
+        if (p >= 1) busy('Solving room', 'Planes → walls → openings → furniture');
+      },
+    });
+    // Overlay: our own thinned points, moved into the solved model frame.
+    const T = res.room.input_transform;
+    const P = scan.pts, out = new Float32Array(P.length);
+    for (let i = 0; i < P.length; i += 3) {
+      const x = P[i], y = P[i + 1], z = P[i + 2];
+      out[i] = T[0][0] * x + T[0][1] * y + T[0][2] * z + T[0][3];
+      out[i + 1] = T[1][0] * x + T[1][1] * y + T[1][2] * z + T[1][3];
+      out[i + 2] = T[2][0] * x + T[2][1] * y + T[2][2] * z + T[2][3];
+    }
+    saveRoom(res.room, `LiDAR · ${f.name}`, out);
+  } catch (err) {
+    fail(err.message || String(err));
+  }
 });
+
+// ---- Demo --------------------------------------------------------------------------
+document.querySelector('[data-action="demo"]').addEventListener('click', async () => {
+  try {
+    busy('Solving demo room', 'Synthetic LiDAR scan of an L-shaped room');
+    const res = await post('/api/demo', null);
+    saveRoom(res.room, 'Demo room', b64ToFloats(res.points));
+  } catch (err) {
+    fail(err.message);
+  }
+});
+
+// ---- Photogrammetry (only when the server has COLMAP) -----------------------------
+function uploadPhotos(form, label) {
+  busy('Uploading…', '', 0);
+  post('/api/photos', form, {
+    onUpload: (p, e) => {
+      $('#proc-bar').style.width = (p * 100).toFixed(1) + '%';
+      $('#proc-msg').textContent = `${(e.loaded / 1e6).toFixed(1)} / ${(e.total / 1e6).toFixed(1)} MB`;
+    },
+  }).then(({ id }) => {
+    store.set('rs.joblabel.' + id, label);
+    location.hash = '#/job/' + id;
+  }).catch(err => fail(err.message));
+}
 
 $('#media-file').addEventListener('change', e => {
   const files = [...e.target.files];
+  e.target.value = '';
   if (!files.length) return;
   const form = new FormData();
   files.forEach(f => form.append('files', f, f.name));
   form.append('marker_cm', $('#marker-cm').value || '0');
   const video = files.some(f => f.type.startsWith('video'));
-  upload('/api/photos', form, video ? 'Photogrammetry · video' : `Photogrammetry · ${files.length} photos`);
-  e.target.value = '';
+  uploadPhotos(form, video ? 'Photogrammetry · video' : `Photogrammetry · ${files.length} photos`);
 });
 
-document.querySelector('[data-action="demo"]').addEventListener('click', async () => {
-  const r = await fetch('/api/demo', { method: 'POST' });
-  const { id } = await r.json();
-  remember(id, 'Demo room');
-  location.hash = '#/job/' + id;
-});
+let pollToken = 0;
+async function pollJob(id) {
+  const token = ++pollToken;
+  busy('Processing', '', 0);
+  while (token === pollToken) {
+    const r = await fetch(`/api/jobs/${id}`);
+    if (!r.ok) return fail('Job not found (jobs live on the server that started them)');
+    const st = await r.json();
+    $('#proc-bar').style.width = (st.progress * 100).toFixed(0) + '%';
+    $('#proc-msg').textContent = st.message || '';
+    if (st.status === 'error') return fail(st.error);
+    if (st.status === 'done') break;
+    await new Promise(res => setTimeout(res, 700));
+  }
+  if (token !== pollToken) return;
+  const res = await fetch(`/api/jobs/${id}/result`).then(r => r.json());
+  saveRoom(res.room, store.get('rs.joblabel.' + id, 'Photogrammetry'), b64ToFloats(res.points));
+}
 
 $('#marker-cm').value = store.get('rs.marker', '');
 $('#marker-cm').addEventListener('change', e => store.set('rs.marker', e.target.value));
 
-// ---- Capture -----------------------------------------------------------------------
 async function startCapture() {
   show('capture');
   if (!capture) {
@@ -156,39 +233,27 @@ $('#cap-done').addEventListener('click', () => {
   $('#cap-strip').innerHTML = '';
   $('#cap-count').textContent = '0';
   $('#cap-rec').classList.remove('on');
-  upload('/api/photos', form, `Camera capture · ${n} photos`);
+  uploadPhotos(form, `Camera capture · ${n} photos`);
 });
 
-// ---- Job: poll, then view ----------------------------------------------------------
-let pollToken = 0;
-async function openJob(id) {
-  const token = ++pollToken;
-  show('processing');
-  $('#proc-err').classList.add('hidden');
-  $('#proc-back').classList.add('hidden');
-  $('#proc-title').textContent = 'Processing';
-  while (token === pollToken) {
-    const r = await fetch(`/api/jobs/${id}`);
-    if (!r.ok) return fail('Job not found');
-    const st = await r.json();
-    $('#proc-bar').style.width = (st.progress * 100).toFixed(0) + '%';
-    $('#proc-msg').textContent = st.message || '';
-    if (st.status === 'error') return fail(st.error);
-    if (st.status === 'done') break;
-    await new Promise(res => setTimeout(res, 700));
+// ---- Viewer ------------------------------------------------------------------------
+async function openRoom(id) {
+  if (current.id !== id) {
+    const room = store.get('rs.room.' + id, null);
+    if (!room) { location.hash = ''; return; }
+    current = { id, room, points: null, scale: store.get('rs.scale.' + id, 1) };
   }
-  if (token !== pollToken) return;
-  current = { id, scale: store.get('rs.scale.' + id, 1) };
-  await showModel(true);
+  busy('Building model');
+  try {
+    await showModel(true);
+  } catch (err) {
+    fail(err.message);
+  }
 }
 
 async function showModel(fresh) {
-  const { id, scale } = current;
-  const [model, pts] = await Promise.all([
-    fetch(`/api/jobs/${id}/model?scale=${scale}`).then(r => r.json()),
-    fresh || !current.points ? fetch(`/api/jobs/${id}/points`).then(r => r.arrayBuffer()).then(b => new Float32Array(b)) : current.points,
-  ]);
-  current.points = pts;
+  const { room, scale, points } = current;
+  const model = await post('/api/model', JSON.stringify({ room, scale }), { type: 'application/json' });
   current.model = model;
   show('viewer');
   if (!viewer) {
@@ -200,9 +265,10 @@ async function showModel(fresh) {
   }
   if (fresh) viewer._fitted = false;
   viewer.resize();
-  viewer.load(model, pts, scale);
+  viewer.load(model, points, scale);
+  $('#t-points').disabled = !points;
+  $('#t-points').parentElement.title = points ? '' : 'Scan points are kept only for the session that imported the scan';
   renderMeta(model);
-  updateExportLinks();
 }
 
 function renderMeta(model) {
@@ -225,19 +291,40 @@ function renderMeta(model) {
   $('#v-warn').classList.toggle('hidden', !warn.length);
 }
 
-function updateExportLinks() {
-  const layers = viewer.visibleLayers().join(',');
-  document.querySelectorAll('[data-fmt]').forEach(a => {
-    a.href = `/api/jobs/${current.id}/export/${a.dataset.fmt}?scale=${current.scale}&layers=${layers}`;
-  });
+async function download(fmt, btn) {
+  const label = btn.textContent;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/api/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ room: current.room, scale: current.scale, layers: viewer.visibleLayers(), fmt }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || `Export failed (${r.status})`);
+    const url = URL.createObjectURL(await r.blob());
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `room-${current.id}.${fmt}`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    btn.textContent = label;
+  }
 }
 
 function bindViewerUI() {
   for (const key of ['ceiling', 'furniture', 'dims', 'sketchy', 'shadows', 'points']) {
     const el = $('#t-' + key);
     el.checked = viewer.state[key];
-    el.addEventListener('change', () => { viewer.set(key, el.checked); updateExportLinks(); });
+    el.addEventListener('change', () => viewer.set(key, el.checked));
   }
+  document.querySelectorAll('[data-fmt]').forEach(btn => {
+    btn.addEventListener('click', e => { e.preventDefault(); download(btn.dataset.fmt, btn); });
+  });
   $('#v-reset').addEventListener('click', () => viewer.resetView());
   $('#v-opts').open = innerWidth >= 900;
   $('#v-opts').addEventListener('toggle', () => viewer.resize());
@@ -268,4 +355,18 @@ function bindViewerUI() {
   });
 }
 
-route();
+// ---- Boot ----------------------------------------------------------------------------
+(async () => {
+  try { config = await fetch('/api/config').then(r => r.json()); } catch { /* offline: keep defaults */ }
+  if (!config.photogrammetry) {
+    for (const el of document.querySelectorAll('.needs-photogrammetry')) {
+      el.classList.add('disabled');
+      el.setAttribute('aria-disabled', 'true');
+      el.querySelector('.card-k').textContent = 'Photogrammetry · local server only';
+      el.querySelector('input')?.setAttribute('disabled', '');
+    }
+    $('#pg-note').classList.remove('hidden');
+    $('.cards').prepend($('label[for="scan-file"]')); // LiDAR is the primary path here
+  }
+  route();
+})();
