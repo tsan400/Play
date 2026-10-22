@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="theme-color" content="#ffffff">
+  <title>RoomSketch</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/build/three.module.min.js",
+        "three/addons/": "./vendor/three/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- HOME -->
+  <section id="home" class="screen">
+    <header class="brand">
+      <svg class="logo" viewBox="0 0 40 40" aria-hidden="true">
+        <path d="M6 30 L6 14 L20 6 L34 14 L34 30 L20 36 Z M6 14 L20 22 L34 14 M20 22 L20 36" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/>
+      </svg>
+      <div>
+        <h1>RoomSketch</h1>
+        <p class="sub">Walk a room, get a measured line-work model for SketchUp.</p>
+      </div>
+    </header>
+
+    <div class="cards">
+      <button class="card" data-go="capture">
+        <span class="card-k">Photogrammetry</span>
+        <span class="card-t">Capture with camera</span>
+        <span class="card-d">Walk the room slowly while the app snaps overlapping photos. Works on any phone. Place the printed marker for true scale.</span>
+      </button>
+      <label class="card" for="scan-file">
+        <span class="card-k">LiDAR · most accurate</span>
+        <span class="card-t">Import LiDAR scan</span>
+        <span class="card-d">Scan with a LiDAR app (3D Scanner App, Polycam, Scaniverse) on an iPhone Pro, export <b>PLY / OBJ / GLB</b>, and open it here.</span>
+        <input id="scan-file" type="file" accept=".ply,.obj,.glb,.gltf,.stl,.xyz,.pts,.txt,.csv" hidden>
+      </label>
+      <label class="card" for="media-file">
+        <span class="card-k">Photogrammetry</span>
+        <span class="card-t">Upload photos or a video</span>
+        <span class="card-d">Pick 40–150 overlapping photos, or one slow walkthrough video, from your library.</span>
+        <input id="media-file" type="file" accept="image/*,video/*" multiple hidden>
+      </label>
+      <button class="card ghost" data-action="demo">
+        <span class="card-t">Try the demo room</span>
+        <span class="card-d">Runs the full pipeline on a synthetic LiDAR scan of an L-shaped room.</span>
+      </button>
+    </div>
+
+    <details class="opts">
+      <summary>Options</summary>
+      <label class="row">Scan up-axis
+        <select id="up-axis">
+          <option value="auto">Auto-detect</option>
+          <option value="y">Y up (ARKit / glTF)</option>
+          <option value="z">Z up</option>
+          <option value="-y">−Y up</option>
+          <option value="-z">−Z up</option>
+        </select>
+      </label>
+      <label class="row">Scale marker size (cm)
+        <input id="marker-cm" type="number" inputmode="decimal" step="0.1" min="0" placeholder="e.g. 15.0">
+      </label>
+      <a class="link" href="marker.html" target="_blank">Print the scale marker →</a>
+    </details>
+    <div id="recent"></div>
+  </section>
+
+  <!-- CAPTURE -->
+  <section id="capture" class="screen hidden dark">
+    <video id="cam" playsinline muted autoplay></video>
+    <div class="hud top">
+      <button class="icon" data-go="home" aria-label="Back">✕</button>
+      <div class="pill"><span id="cap-count">0</span> photos</div>
+      <div class="pill" id="cap-sharp">—</div>
+    </div>
+    <div id="cap-tip" class="tip">Start in a corner. Move sideways along each wall with the phone upright. Keep ~2/3 overlap.</div>
+    <div id="cap-flash" class="flash"></div>
+    <div class="hud bottom">
+      <div class="strip" id="cap-strip"></div>
+      <div class="cap-controls">
+        <button id="cap-shutter" class="secondary">Snap</button>
+        <button id="cap-rec" class="rec" aria-label="Start auto capture"><span></span></button>
+        <button id="cap-done" class="primary" disabled>Process</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROCESSING -->
+  <section id="processing" class="screen hidden">
+    <div class="proc">
+      <div class="spinner"></div>
+      <h2 id="proc-title">Uploading…</h2>
+      <div class="bar"><div id="proc-bar"></div></div>
+      <p id="proc-msg" class="muted"></p>
+      <p id="proc-err" class="error hidden"></p>
+      <button class="secondary hidden" id="proc-back" data-go="home">Back</button>
+    </div>
+  </section>
+
+  <!-- VIEWER -->
+  <section id="viewer" class="screen hidden">
+    <div id="stage"></div>
+    <div class="vbar top">
+      <button class="icon" data-go="home" aria-label="Home">←</button>
+      <div class="vtitle">
+        <div id="v-title">Room</div>
+        <div id="v-sub" class="muted small"></div>
+      </div>
+      <button class="icon" id="v-reset" aria-label="Reset view">⟲</button>
+    </div>
+    <div id="v-warn" class="warn hidden"></div>
+    <div id="v-calib" class="calib hidden">
+      <div id="v-calib-msg">Tap an edge whose real length you know.</div>
+      <div class="calib-row hidden" id="v-calib-row">
+        <span id="v-calib-cur"></span>
+        <input id="v-calib-val" type="number" inputmode="decimal" step="0.001" placeholder="actual">
+        <select id="v-calib-unit"><option value="m">m</option><option value="cm">cm</option><option value="in">in</option><option value="ft">ft</option></select>
+        <button class="primary" id="v-calib-apply">Apply</button>
+      </div>
+      <button class="link" id="v-calib-cancel">Cancel</button>
+    </div>
+    <div class="sheet">
+      <div class="metrics" id="v-metrics"></div>
+      <details class="vopts" id="v-opts">
+        <summary>View options</summary>
+        <div class="toggles">
+          <label><input type="checkbox" id="t-ceiling"> Ceiling</label>
+          <label><input type="checkbox" id="t-furniture" checked> Furniture</label>
+          <label><input type="checkbox" id="t-dims" checked> Dimensions</label>
+          <label><input type="checkbox" id="t-sketchy" checked> Sketchy lines</label>
+          <label><input type="checkbox" id="t-shadows" checked> Shadows</label>
+          <label><input type="checkbox" id="t-points"> Scan points</label>
+        </div>
+      </details>
+      <div class="actions">
+        <button class="secondary" id="v-calibrate">Calibrate scale</button>
+        <div class="export">
+          <span class="muted small">Export</span>
+          <a class="btn" data-fmt="rb" title="SketchUp Ruby script: exact faces, grouped & tagged">SketchUp .rb</a>
+          <a class="btn" data-fmt="dae" title="Collada: imports in every SketchUp version">.dae</a>
+          <a class="btn" data-fmt="dxf" title="DXF R12: 3D faces + line work">.dxf</a>
+          <a class="btn" data-fmt="obj">.obj</a>
+          <a class="btn" data-fmt="svg" title="Dimensioned floor plan">Plan .svg</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

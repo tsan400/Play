@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scale Marker</title>
+  <style>
+    :root { --ink: #16181d; }
+    body { margin: 0; background: #fff; color: var(--ink); font: 15px/1.45 -apple-system, Helvetica, Arial, sans-serif; }
+    main { max-width: 640px; margin: 0 auto; padding: 24px 16px; }
+    .sheet { display: grid; place-items: center; margin: 24px 0; }
+    /* The PNG has a white quiet zone of 1/8 of the marker on each side. */
+    .sheet img { width: 18.75cm; height: 18.75cm; image-rendering: pixelated; }
+    ol li { margin-bottom: 6px; }
+    @media print { .noprint { display: none; } main { padding: 0; } .sheet { margin: 2cm 0 0; } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="noprint">
+      <h1>Scale marker</h1>
+      <ol>
+        <li>Print this page at 100% (no "fit to page"). The black square should be about 15 cm wide.</li>
+        <li><b>Measure the black square edge to edge</b> with a ruler and enter that size (cm) in RoomSketch → Options.</li>
+        <li>Lay it flat on the floor or tape it to a wall where several photos will see it.</li>
+      </ol>
+      <button onclick="print()">Print</button>
+    </div>
+    <div class="sheet"><img src="/api/marker.png" alt="ArUco marker 4x4 id 0"></div>
+    <p class="noprint">ArUco DICT_4X4_50, id 0. Any marker from that dictionary works; use several for big rooms.</p>
+  </main>
+</body>
+</html>
