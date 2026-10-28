@@ -44,6 +44,11 @@ Filter by severity chips, clash type or text; toggle models. Click a clash
 (or double-click an element in 3D) to zoom to it: element A is orange,
 element B red, everything else ghosted. Esc or H returns to the full model.
 
+Tools (top-right of the 3D view): Identify (I) shows an element's source file,
+category, type, level, Revit ID, GUID and its clashes; Measure (M) measures
+between two clicked points (snaps to corners) with total, horizontal and
+vertical distance; Clear removes measurements.
+
 Navigation: left-drag orbits, right- or middle-drag pans, scroll zooms toward
 the cursor with inertia, trackpad two-finger swipe pans and pinch zooms, and
 camera moves between clashes are eased.

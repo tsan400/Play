@@ -79,6 +79,20 @@
   #legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
   #hint { position: absolute; left: 16px; bottom: 16px; font-size: 11.5px; color: var(--muted); background: rgba(255,255,255,.85); padding: 6px 10px; pointer-events: none; }
   @media (hover: none) { #hint { display: none; } }
+  #tools { position: absolute; top: 16px; right: 16px; display: flex; background: #fff; box-shadow: 0 2px 10px rgba(20,27,63,.15); z-index: 2; }
+  #tools button { font: inherit; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; border: 0; background: #fff; color: var(--navy); padding: 9px 13px; cursor: pointer; border-right: 1px solid var(--line); }
+  #tools button:last-child { border-right: 0; }
+  #tools button.on { background: var(--navy); color: #fff; }
+  #info { position: absolute; top: 60px; right: 16px; width: 320px; background: #fff; box-shadow: 0 6px 24px rgba(20,27,63,.18); display: none; z-index: 2; font-size: 12.5px; }
+  #info h4 { margin: 0; padding: 10px 14px; background: #2f80c4; color: #fff; font-size: 14px; font-weight: 600; display: flex; justify-content: space-between; gap: 8px; }
+  #info dl { display: grid; grid-template-columns: 78px 1fr; gap: 4px 10px; margin: 0; padding: 10px 14px; }
+  #info dt { color: var(--muted); } #info dd { margin: 0; color: var(--navy); word-break: break-word; }
+  #info .cl { padding: 0 14px 12px; display: flex; flex-wrap: wrap; gap: 5px; }
+  #info .cl button { font: inherit; font-size: 11.5px; border: 1px solid var(--line); background: #fff; color: var(--navy); padding: 3px 7px; cursor: pointer; border-left: 3px solid var(--c); }
+  .mlabel { position: absolute; transform: translate(-50%, -50%); background: var(--navy); color: #fff; font-size: 12px; font-weight: 600; padding: 4px 8px; pointer-events: none; white-space: nowrap; z-index: 1; }
+  .mlabel small { font-weight: 400; opacity: .75; margin-left: 6px; }
+  #stage.measure canvas, #stage.identify canvas { cursor: crosshair !important; }
+  @media (max-width: 900px) { #info { left: 8px; right: 8px; width: auto; top: 54px; } #tools { right: 8px; top: 8px; } }
   #loading { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(255,255,255,.85); font-weight: 600; color: var(--navy); }
   .x { cursor: pointer; opacity: .8; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 50vh 1fr; } aside { order: 2; } nav { display: none; } #card { width: auto; left: 16px; } }
@@ -128,6 +142,8 @@
   <section id="stage">
     <div id="legend"></div>
     <div id="card"><h3><span id="cTitle"></span><span class="x" id="cClose">✕</span></h3><div class="body" id="cBody"></div></div>
+    <div id="tools"><button data-tool="nav" class="on" title="Navigate (N)">Navigate</button><button data-tool="identify" title="Identify (I)">Identify</button><button data-tool="measure" title="Measure (M)">Measure</button><button id="mClear" title="Clear measurements">Clear</button></div>
+    <div id="info"><h4><span id="iTitle"></span><span class="x" id="iClose">✕</span></h4><dl id="iBody"></dl><div class="cl" id="iClashes"></div></div>
     <div id="hint">Drag to orbit · Right/middle-drag to pan · Scroll or pinch to zoom · H to reset</div>
     <div id="loading">Loading models…</div>
   </section>
@@ -144,11 +160,14 @@ const HIT_A = 0xe8912d, HIT_B = 0xd64045;
 
 const stage = document.getElementById("stage");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
+// Coincident faces (duplicates across models, finish layers) flicker when the
+// renderer re-sorts transparent objects each frame; keep a fixed draw order.
+renderer.sortObjects = false;
 renderer.setPixelRatio(devicePixelRatio);
 renderer.setClearColor(0xffffff);
 stage.prepend(renderer.domElement);
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 500);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.085;
@@ -160,7 +179,7 @@ controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
 // Wheel/trackpad is intercepted below (smooth zoom-to-cursor); touch pinch stays with OrbitControls.
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a8, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(30, 60, 20); scene.add(sun);
-const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), new THREE.MeshBasicMaterial({ color: HIT_B, depthTest: false }));
+const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), new THREE.MeshBasicMaterial({ color: HIT_B, depthTest: false, transparent: true, opacity: .85 }));
 marker.renderOrder = 10; marker.visible = false; scene.add(marker);
 
 function resize() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); }
@@ -224,6 +243,11 @@ renderer.setAnimationLoop(now => {
     panVel.multiplyScalar(Math.pow(.84, dt));
   }
   controls.update();
+  // Keep the depth range tight around what is on screen for better precision.
+  const dist = camera.position.distanceTo(controls.target);
+  const near = THREE.MathUtils.clamp(dist / 400, .02, 1), far = Math.max(dist * 40, 200);
+  if (Math.abs(camera.near - near) / near > .1 || camera.far !== far) { camera.near = near; camera.far = far; camera.updateProjectionMatrix(); }
+  updateMeasureLabels();
   renderer.render(scene, camera);
 });
 // Grab cursor feedback.
@@ -236,8 +260,13 @@ cv.addEventListener("contextmenu", e => e.preventDefault());
 let data, groups = {}, meshes = {}, filtered = [], shown = 200, selected = null;
 const filters = { sev: new Set(["High", "Medium", "Low"]), type: "", q: "" };
 const mats = {};
+// Polygon offset per layer so coincident faces resolve the same way every frame:
+// highlights win, then MEP, structure, architecture.
+const OFFSET = { A: -3, B: -3, pick: -4, MEP: -1, STRUCT: 0, ARCH: 1 };
 function mat(key, color, opacity = 1) {
-  return mats[key] ??= new THREE.MeshStandardMaterial({ color, roughness: .8, metalness: 0, transparent: opacity < 1, opacity, depthWrite: opacity === 1, side: THREE.DoubleSide });
+  const off = OFFSET[key] ?? OFFSET[key.replace("ghost", "")] ?? 0;
+  return mats[key] ??= new THREE.MeshStandardMaterial({ color, roughness: .8, metalness: 0, transparent: opacity < 1, opacity, depthWrite: opacity === 1, side: THREE.DoubleSide,
+    polygonOffset: off !== 0, polygonOffsetFactor: off, polygonOffsetUnits: off * 2 });
 }
 
 async function loadProject(slug) {
@@ -257,6 +286,8 @@ async function loadProject(slug) {
   if (!controls.target.lengthSq()) { controls.target.copy(home.t); camera.position.copy(home.p).multiplyScalar(1.15); }
   flyTo(home.t, home.p, 900);
   bounds = box; layerOff = new Set(); isolated = null; setSection("");
+  scene.add(marker, mGroup, hover);   // overlays draw last (sortObjects is off)
+  picked = null; clearMeasures?.(); document.getElementById("info").style.display = "none";
   buildFilters(); buildLayers(); select(null); applyFilters();
   document.getElementById("loading").style.display = "none";
 }
@@ -341,6 +372,7 @@ function paint() {
     else if (guid === a) m.material = mat("A", HIT_A);
     else if (parts.has(guid)) m.material = mat("B", HIT_B);
     else m.material = mat("ghost" + d, DISC[d].color, .05);
+    if (guid === picked) m.material = mat("pick", 0x2f80c4);
     m.renderOrder = selected && (guid === a || parts.has(guid)) ? 5 : 0;
   }
 }
@@ -412,9 +444,110 @@ renderer.domElement.addEventListener("dblclick", e => {
   if (c) { select(c); document.querySelector(`.item[data-id="${c.id}"]`)?.scrollIntoView({ block: "center" }); }
 });
 document.getElementById("cClose").onclick = () => select(null);
+
+// ---- Tools: navigate / identify / measure ----
+let tool = "nav", picked = null;
+function setTool(t) {
+  tool = t;
+  document.querySelectorAll("[data-tool]").forEach(b => b.classList.toggle("on", b.dataset.tool === t));
+  stage.classList.toggle("measure", t === "measure"); stage.classList.toggle("identify", t === "identify");
+  pending = null; hover.visible = false;
+  if (t !== "identify") pick(null);
+}
+document.querySelectorAll("[data-tool]").forEach(b => b.onclick = () => setTool(b.dataset.tool));
+
+function raycastAt(cx, cy) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  return ray.intersectObjects(Object.values(meshes).filter(m => m.visible), false)
+    .find(h => !secAxis || clip.distanceToPoint(h.point) >= 0);
+}
+function toScreen(v) { const r = renderer.domElement.getBoundingClientRect(), p = v.clone().project(camera); return { x: (p.x + 1) / 2 * r.width, y: (1 - p.y) / 2 * r.height, z: p.z }; }
+
+// Identify
+function pick(guid) {
+  picked = guid; paint();
+  const box = document.getElementById("info");
+  if (!guid) { box.style.display = "none"; return; }
+  const m = meshes[guid], e = data.elements[guid], d = m?.userData.disc;
+  const file = data.models.find(x => x.disc === d)?.file || "";
+  const merged = /^ctx_\d+$/.test(guid);
+  document.getElementById("iTitle").textContent = e ? `${e.kind}` : `${m.userData.kind}${merged ? " (merged)" : ""}`;
+  const rows = [["Source", file], ["Discipline", DISC[d]?.label], ["Category", e?.kind || m.userData.kind]];
+  if (e) rows.push(["Type", e.type], ["Name", e.name], ["Level", e.level], ["Revit ID", e.revit_id], ["GUID", guid]);
+  else if (merged) rows.push(["Note", "Low-res view: elements not in a clash are merged by category."]);
+  document.getElementById("iBody").innerHTML = rows.filter(r => r[1]).map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  const cl = data.clashes.filter(c => c.a === guid || c.b === guid || c.parts.includes(guid));
+  document.getElementById("iClashes").innerHTML = cl.length ? `<div style="width:100%;color:var(--muted)">${cl.length} clash${cl.length > 1 ? "es" : ""}</div>` +
+    cl.slice(0, 12).map(c => `<button data-c="${c.id}" style="--c:var(${SEV[c.severity]})">${c.id}</button>`).join("") + (cl.length > 12 ? `<span>+${cl.length - 12}</span>` : "") : `<div style="color:var(--muted)">No clashes on this element.</div>`;
+  document.querySelectorAll("#iClashes [data-c]").forEach(b => b.onclick = () => { const c = data.clashes.find(x => x.id === b.dataset.c); setTool("nav"); select(c); document.querySelector(`.item[data-id="${c.id}"]`)?.scrollIntoView({ block: "center" }); });
+  box.style.display = "block";
+}
+document.getElementById("iClose").onclick = () => pick(null);
+
+// Measure: click two points; snaps to a corner of the face under the cursor.
+const measures = [], mGroup = new THREE.Group(); scene.add(mGroup);
+const dotGeo = new THREE.SphereGeometry(1, 16, 12);
+const mMat = new THREE.MeshBasicMaterial({ color: 0x00b261, depthTest: false, transparent: true });
+const lMat = new THREE.LineBasicMaterial({ color: 0x00a058, depthTest: false, transparent: true, linewidth: 2 });
+const hover = new THREE.Mesh(dotGeo, new THREE.MeshBasicMaterial({ color: 0x00b261, depthTest: false, transparent: true, opacity: .6 }));
+hover.visible = false; scene.add(hover);
+let pending = null;
+function dot(p) { const m = new THREE.Mesh(dotGeo, mMat); m.position.copy(p); m.userData.dot = true; mGroup.add(m); return m; }
+function snapPoint(h, cx, cy) {
+  if (!h.face) return h.point.clone();
+  const pos = h.object.geometry.attributes.position, best = { d: 14, p: null };
+  for (const i of [h.face.a, h.face.b, h.face.c]) {
+    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(h.object.matrixWorld);
+    const s = toScreen(v), r = renderer.domElement.getBoundingClientRect();
+    const d = Math.hypot(s.x + r.left - cx, s.y + r.top - cy);
+    if (d < best.d) { best.d = d; best.p = v; }
+  }
+  return best.p || h.point.clone();
+}
+function ftin(m) { const t = Math.abs(m) * 39.3701, ft = Math.floor(t / 12), inch = t - ft * 12; return `${ft}'-${inch.toFixed(1)}"`; }
+function addMeasure(a, b) {
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lMat);
+  mGroup.add(line); dot(a); dot(b);
+  const el = document.createElement("div"); el.className = "mlabel";
+  const dh = Math.hypot(b.x - a.x, b.z - a.z), dv = b.y - a.y;
+  el.innerHTML = `${ftin(a.distanceTo(b))}<small>H ${ftin(dh)} · V ${ftin(dv)}</small>`;
+  stage.appendChild(el);
+  measures.push({ a, b, el, line });
+}
+function updateMeasureLabels() {
+  const scale = camera.position.distanceTo(controls.target) * .006;
+  mGroup.children.forEach(o => o.userData.dot && o.scale.setScalar(scale)); hover.scale.setScalar(scale * 1.3);
+  for (const m of measures) {
+    const s = toScreen(m.a.clone().add(m.b).multiplyScalar(.5));
+    m.el.style.display = s.z < 1 ? "block" : "none"; m.el.style.left = s.x + "px"; m.el.style.top = s.y + "px";
+  }
+}
+function clearMeasures() { measures.forEach(m => m.el.remove()); measures.length = 0; mGroup.clear(); pending = null; }
+document.getElementById("mClear").onclick = clearMeasures;
+
+let downAt = null, moveT = 0;
+cv.addEventListener("pointerdown", e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
+cv.addEventListener("pointerup", e => {
+  if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) return;
+  const h = raycastAt(e.clientX, e.clientY);
+  if (tool === "identify") pick(h?.object.userData.guid || null);
+  else if (tool === "measure" && h) {
+    const p = snapPoint(h, e.clientX, e.clientY);
+    if (!pending) { pending = dot(p); }
+    else { mGroup.remove(pending); addMeasure(pending.position.clone(), p); pending = null; }
+  }
+});
+cv.addEventListener("pointermove", e => {
+  if (tool !== "measure" || e.buttons || performance.now() - moveT < 30) return;
+  moveT = performance.now();
+  const h = raycastAt(e.clientX, e.clientY);
+  hover.visible = !!h; if (h) hover.position.copy(snapPoint(h, e.clientX, e.clientY));
+});
 document.getElementById("type").onchange = e => { filters.type = e.target.value; applyFilters(); };
 document.getElementById("q").oninput = e => { filters.q = e.target.value; applyFilters(); };
-addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return; if (e.key === "Escape") select(null); if ((e.key === "h" || e.key === "f") && home) flyTo(home.t, home.p); });
+addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return; if (e.key === "Escape") { if (pending) { mGroup.remove(pending); pending = null; } else if (picked) pick(null); else select(null); } if (e.key === "m") setTool("measure"); if (e.key === "i") setTool("identify"); if (e.key === "n") setTool("nav"); if ((e.key === "h" || e.key === "f") && home) flyTo(home.t, home.p); });
 
 const index = await (await fetch("data/index.json")).json();
 const sel = document.getElementById("project");
