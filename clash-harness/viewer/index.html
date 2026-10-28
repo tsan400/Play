@@ -77,6 +77,8 @@
   .action { margin-top: 10px; padding: 9px 11px; background: #e6f6ee; border-left: 3px solid var(--green); }
   #legend { position: absolute; left: 16px; top: 16px; background: rgba(255,255,255,.92); padding: 10px 12px; font-size: 12px; }
   #legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+  #hint { position: absolute; left: 16px; bottom: 16px; font-size: 11.5px; color: var(--muted); background: rgba(255,255,255,.85); padding: 6px 10px; pointer-events: none; }
+  @media (hover: none) { #hint { display: none; } }
   #loading { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(255,255,255,.85); font-weight: 600; color: var(--navy); }
   .x { cursor: pointer; opacity: .8; }
   @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 50vh 1fr; } aside { order: 2; } nav { display: none; } #card { width: auto; left: 16px; } }
@@ -126,6 +128,7 @@
   <section id="stage">
     <div id="legend"></div>
     <div id="card"><h3><span id="cTitle"></span><span class="x" id="cClose">✕</span></h3><div class="body" id="cBody"></div></div>
+    <div id="hint">Drag to orbit · Right/middle-drag to pan · Scroll or pinch to zoom · H to reset</div>
     <div id="loading">Loading models…</div>
   </section>
 </main>
@@ -148,6 +151,13 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+controls.dampingFactor = 0.085;
+controls.rotateSpeed = 0.55;
+controls.panSpeed = 0.9;
+controls.screenSpacePanning = true;
+controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
+// Wheel/trackpad is intercepted below (smooth zoom-to-cursor); touch pinch stays with OrbitControls.
 scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a8, 1.6));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(30, 60, 20); scene.add(sun);
 const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), new THREE.MeshBasicMaterial({ color: HIT_B, depthTest: false }));
@@ -155,7 +165,73 @@ marker.renderOrder = 10; marker.visible = false; scene.add(marker);
 
 function resize() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(stage);
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+// ---- Motion: eased fly-to, inertial zoom-to-cursor, trackpad pan ----
+const ease = t => t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+let flight = null, zoomVel = 0, zoomPt = new THREE.Vector3(), panVel = new THREE.Vector2();
+function flyTo(target, position, ms = 750) {
+  flight = { t0: performance.now(), ms, ft: controls.target.clone(), fp: camera.position.clone(), tt: target.clone(), tp: position.clone() };
+  zoomVel = 0; panVel.set(0, 0);
+}
+const ndc = new THREE.Vector2(), ray = new THREE.Raycaster();
+function pointUnderCursor(e) {
+  const r = renderer.domElement.getBoundingClientRect();
+  ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  ray.setFromCamera(ndc, camera);
+  const hit = ray.intersectObjects(Object.values(meshes).filter(m => m.visible), false)
+    .find(h => !secAxis || clip.distanceToPoint(h.point) >= 0);
+  if (hit) return hit.point;
+  // Nothing under the cursor: use the point at the orbit target's depth.
+  const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()), controls.target);
+  return ray.ray.intersectPlane(plane, new THREE.Vector3()) || controls.target.clone();
+}
+stage.addEventListener("wheel", e => {
+  if (e.target !== renderer.domElement) return;
+  e.preventDefault(); e.stopPropagation();
+  flight = null;
+  const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+  const isTrackpadPan = !e.ctrlKey && e.deltaMode === 0 && Math.abs(e.deltaX) > 0;
+  if (isTrackpadPan) { panVel.x += e.deltaX * .0016; panVel.y += e.deltaY * .0016; return; }
+  zoomPt.copy(pointUnderCursor(e));
+  // Pinch (ctrlKey) sends small deltas; amplify so it tracks the fingers.
+  zoomVel += -e.deltaY * px * (e.ctrlKey ? .012 : .0018);
+  zoomVel = THREE.MathUtils.clamp(zoomVel, -1.2, 1.2);
+}, { passive: false, capture: true });
+const cam2tgt = new THREE.Vector3(), right = new THREE.Vector3(), up = new THREE.Vector3();
+let last = performance.now();
+renderer.setAnimationLoop(now => {
+  const dt = Math.min((now - last) / 16.67, 3); last = now;
+  if (flight) {
+    const t = Math.min((now - flight.t0) / flight.ms, 1), k = ease(t);
+    controls.target.lerpVectors(flight.ft, flight.tt, k);
+    camera.position.lerpVectors(flight.fp, flight.tp, k);
+    if (t === 1) flight = null;
+  }
+  if (Math.abs(zoomVel) > 1e-4) {
+    // Scale camera and target about the cursor point: zooms "into" what you point at.
+    const f = Math.exp(-zoomVel * .16 * dt);
+    const d = camera.position.distanceTo(zoomPt);
+    if (!(zoomVel > 0 && d * f < .25)) {
+      camera.position.sub(zoomPt).multiplyScalar(f).add(zoomPt);
+      controls.target.sub(zoomPt).multiplyScalar(f).add(zoomPt);
+    }
+    zoomVel *= Math.pow(.84, dt);
+  }
+  if (panVel.lengthSq() > 1e-8) {
+    const dist = camera.position.distanceTo(controls.target);
+    right.setFromMatrixColumn(camera.matrix, 0); up.setFromMatrixColumn(camera.matrix, 1);
+    cam2tgt.copy(right).multiplyScalar(panVel.x * dist * .16 * dt).addScaledVector(up, -panVel.y * dist * .16 * dt);
+    camera.position.add(cam2tgt); controls.target.add(cam2tgt);
+    panVel.multiplyScalar(Math.pow(.84, dt));
+  }
+  controls.update();
+  renderer.render(scene, camera);
+});
+// Grab cursor feedback.
+const cv = renderer.domElement;
+cv.style.cursor = "grab"; cv.style.touchAction = "none";
+cv.addEventListener("pointerdown", e => { flight = null; cv.style.cursor = e.button === 0 && !e.shiftKey ? "grabbing" : "move"; });
+addEventListener("pointerup", () => cv.style.cursor = "grab");
+cv.addEventListener("contextmenu", e => e.preventDefault());
 
 let data, groups = {}, meshes = {}, filtered = [], shown = 200, selected = null;
 const filters = { sev: new Set(["High", "Medium", "Low"]), type: "", q: "" };
@@ -177,8 +253,9 @@ async function loadProject(slug) {
   }));
   const box = new THREE.Box3(); Object.values(groups).forEach(g => box.expandByObject(g));
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length();
-  controls.target.copy(c); camera.position.copy(c).add(new THREE.Vector3(s * .6, s * .45, s * .6));
-  home = { t: c.clone(), p: camera.position.clone() };
+  home = { t: c.clone(), p: c.clone().add(new THREE.Vector3(s * .6, s * .45, s * .6)) };
+  if (!controls.target.lengthSq()) { controls.target.copy(home.t); camera.position.copy(home.p).multiplyScalar(1.15); }
+  flyTo(home.t, home.p, 900);
   bounds = box; layerOff = new Set(); isolated = null; setSection("");
   buildFilters(); buildLayers(); select(null); applyFilters();
   document.getElementById("loading").style.display = "none";
@@ -307,7 +384,7 @@ function select(c) {
   document.querySelectorAll(".item").forEach(i => i.classList.toggle("sel", c && i.dataset.id === c.id));
   const card = document.getElementById("card");
   if (!c && bounds) applyVisibility();
-  if (!c) { card.style.display = "none"; marker.visible = false; if (home) { controls.target.copy(home.t); camera.position.copy(home.p); } return; }
+  if (!c) { card.style.display = "none"; marker.visible = false; if (home) flyTo(home.t, home.p); return; }
   const A = data.elements[c.a], B = data.elements[c.b], dn = d => DISC[d]?.label || d;
   document.getElementById("cTitle").textContent = `${c.id} · ${c.severity}`;
   document.getElementById("cBody").innerHTML = `<div style="font-weight:600;color:var(--navy)">${c.type}</div><div>${c.desc}</div>
@@ -322,7 +399,7 @@ function select(c) {
   const box = new THREE.Box3(); [c.a, c.b].forEach(g => meshes[g] && box.expandByObject(meshes[g]));
   const r = Math.min(Math.max(box.getSize(new THREE.Vector3()).length() * .5, 1.5), 8);
   const dir = camera.position.clone().sub(controls.target).normalize();
-  controls.target.copy(p); camera.position.copy(p).addScaledVector(dir, r * 2.5);
+  flyTo(p, p.clone().addScaledVector(dir, r * 2.5));
 }
 
 renderer.domElement.addEventListener("dblclick", e => {
@@ -337,7 +414,7 @@ renderer.domElement.addEventListener("dblclick", e => {
 document.getElementById("cClose").onclick = () => select(null);
 document.getElementById("type").onchange = e => { filters.type = e.target.value; applyFilters(); };
 document.getElementById("q").oninput = e => { filters.q = e.target.value; applyFilters(); };
-addEventListener("keydown", e => { if (e.key === "Escape") select(null); });
+addEventListener("keydown", e => { if (e.target.tagName === "INPUT") return; if (e.key === "Escape") select(null); if ((e.key === "h" || e.key === "f") && home) flyTo(home.t, home.p); });
 
 const index = await (await fetch("data/index.json")).json();
 const sel = document.getElementById("project");

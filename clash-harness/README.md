@@ -42,4 +42,8 @@ within ~1 ft count as one clash.
 
 Filter by severity chips, clash type or text; toggle models. Click a clash
 (or double-click an element in 3D) to zoom to it: element A is orange,
-element B red, everything else ghosted. Esc returns to the full model.
+element B red, everything else ghosted. Esc or H returns to the full model.
+
+Navigation: left-drag orbits, right- or middle-drag pans, scroll zooms toward
+the cursor with inertia, trackpad two-finger swipe pans and pinch zooms, and
+camera moves between clashes are eased.
