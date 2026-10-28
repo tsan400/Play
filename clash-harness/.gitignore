@@ -1,2 +1,3 @@
 viewer/data/
 __pycache__/
+dist/
