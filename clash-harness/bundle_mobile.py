@@ -49,10 +49,10 @@ def simplify(m, ratio):
         return m
 
 
-def build_glb(path, keep, ratio):
+def build_glb(path, keep, ratio, kinds, kind_ids):
     scene = trimesh.load(path, force="scene")
     meta = {}
-    out, rest = trimesh.Scene(), []
+    out, rest = trimesh.Scene(), {}
     for node in scene.graph.nodes_geometry:
         tf, gname = scene.graph[node]
         m = scene.geometry[gname].copy()
@@ -61,9 +61,10 @@ def build_glb(path, keep, ratio):
         if guid in keep:
             out.add_geometry(simplify(m, min(1, ratio * 1.5)), node_name=guid, geom_name=guid)
         else:
-            rest.append(simplify(m, ratio))
-    if rest:
-        out.add_geometry(trimesh.util.concatenate(rest), node_name="context", geom_name="context")
+            rest.setdefault(kinds.get(guid, "Other"), []).append(simplify(m, ratio))
+    # One merged mesh per category keeps draw calls low but layers usable.
+    for kind, parts in rest.items():
+        out.add_geometry(trimesh.util.concatenate(parts), node_name=f"ctx_{kind_ids[kind]}", geom_name=f"ctx_{kind_ids[kind]}")
     buf = io.BytesIO()
     out.export(buf, file_type="glb", include_normals=False)
     return buf.getvalue()
@@ -87,6 +88,9 @@ def main():
         keep = {g for c in meta["clashes"] for g in (c["a"], c["b"], *c["parts"])}
         # Drop furniture/finishes not involved in a clash.
         drop = {g for g, e in meta["elements"].items() if e["kind"] in DROP_KINDS and g not in keep}
+        kinds = {g: e["kind"] for g, e in meta["elements"].items()}
+        meta["ctx_kinds"] = sorted(set(kinds.values()) | {"Other"})
+        kind_ids = {k: i for i, k in enumerate(meta["ctx_kinds"])}
         meta["elements"] = {g: e for g, e in meta["elements"].items() if g in keep}
         meta["summary"].pop("Info", None)
         for c in meta["clashes"]:
@@ -99,7 +103,7 @@ def main():
                     scene.delete_geometry(scene.graph[node][1])
             tmp = out / f".{fname}"
             scene.export(tmp)
-            bundle[fname] = base64.b64encode(build_glb(tmp, keep, args.ratio)).decode()
+            bundle[fname] = base64.b64encode(build_glb(tmp, keep, args.ratio, kinds, kind_ids)).decode()
             tmp.unlink()
         lines = (data / meta["csv"]).read_text(encoding="utf-8-sig").splitlines(keepends=True)
         csv_bytes = ("\ufeff" + lines[0] + "".join(l for l in lines[1:] if ",Info," not in l)).encode()

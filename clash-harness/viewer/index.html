@@ -43,7 +43,20 @@
   .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
   .toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .sw { width: 12px; height: 12px; display: inline-block; }
-  #list { overflow: auto; flex: 1; }
+  #list { overflow: auto; flex: 1; min-height: 160px; }
+  .layers { max-height: 230px; overflow: auto; background: #fff; border: 1px solid var(--line); }
+  .lyr { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-bottom: 1px solid var(--line); }
+  .lyr.file { background: #eef0f4; font-weight: 600; color: var(--navy); }
+  .lyr.cat { padding-left: 26px; }
+  .lyr .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+  .lyr .nm:hover { color: var(--green); }
+  .lyr .ct { color: #9a9ca3; font-size: 12px; }
+  .lyr.iso { outline: 2px solid var(--green); outline-offset: -2px; }
+  .lyr .tw { cursor: pointer; width: 12px; color: var(--muted); }
+  .mini { font: inherit; font-size: 11px; font-weight: 600; text-transform: uppercase; padding: 4px 8px; background: #fff; border: 1px solid var(--line); color: var(--navy); cursor: pointer; }
+  .mini.on { background: var(--navy); color: #fff; }
+  .sec { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .sec input[type=range] { flex: 1; accent-color: var(--green); }
   .item { padding: 11px 18px; border-bottom: 1px solid var(--line); cursor: pointer; background: #fff; border-left: 4px solid var(--c); }
   .item:hover { background: #f0f6f3; }
   .item.sel { background: #e6f6ee; outline: 1px solid var(--green); }
@@ -96,8 +109,17 @@
       </div>
     </div>
     <div class="sect">
-      <div class="eyebrow">Models</div>
-      <div class="toggles" id="toggles"></div>
+      <div class="eyebrow" style="display:flex;justify-content:space-between">Section cut <span id="secVal"></span></div>
+      <div class="sec">
+        <button class="mini on" data-ax="">Off</button><button class="mini" data-ax="y">Plan</button><button class="mini" data-ax="x">E–W</button><button class="mini" data-ax="z">N–S</button>
+        <button class="mini" id="secFlip" title="Flip which side is kept">⇅ Flip</button>
+      </div>
+      <div class="sec"><input type="range" id="secPos" min="0" max="1000" value="500" disabled></div>
+    </div>
+    <div class="sect">
+      <div class="eyebrow" style="display:flex;justify-content:space-between">Layers <span><button class="mini" id="lyrAll">Show all</button></span></div>
+      <div class="layers" id="layers"></div>
+      <div style="font-size:11.5px;color:#9a9ca3;margin-top:5px">Tick to show/hide. Click a name to isolate it; click again to show everything.</div>
     </div>
     <div id="list"></div>
   </aside>
@@ -150,17 +172,89 @@ async function loadProject(slug) {
   const loader = new GLTFLoader();
   await Promise.all(Object.entries(data.glb).map(async ([d, file]) => {
     const gltf = await loader.loadAsync(`data/${file}`);
-    gltf.scene.traverse(o => { if (o.isMesh) { o.geometry.deleteAttribute("normal"); o.geometry.computeVertexNormals(); const guid = (o.parent?.name && data.elements[o.parent.name]) ? o.parent.name : o.name; o.userData.guid = guid; o.userData.disc = d; meshes[guid] = o; } });
+    gltf.scene.traverse(o => { if (o.isMesh) { o.geometry.deleteAttribute("normal"); o.geometry.computeVertexNormals(); const guid = (o.parent?.name && data.elements[o.parent.name]) ? o.parent.name : o.name; o.userData.guid = guid; o.userData.disc = d; o.userData.kind = data.elements[guid]?.kind || (/^ctx_\d+$/.test(guid) ? data.ctx_kinds[+guid.slice(4)] : "Other"); meshes[guid] = o; } });
     groups[d] = gltf.scene; scene.add(gltf.scene);
   }));
   const box = new THREE.Box3(); Object.values(groups).forEach(g => box.expandByObject(g));
   const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length();
   controls.target.copy(c); camera.position.copy(c).add(new THREE.Vector3(s * .6, s * .45, s * .6));
   home = { t: c.clone(), p: camera.position.clone() };
-  buildFilters(); select(null); applyFilters();
+  bounds = box; layerOff = new Set(); isolated = null; setSection("");
+  buildFilters(); buildLayers(); select(null); applyFilters();
   document.getElementById("loading").style.display = "none";
 }
-let home;
+let home, bounds, layerOff = new Set(), isolated = null;
+
+// ---- Layers: one entry per source file, with its element categories ----
+function layerKey(m) { return m.userData.disc + "|" + m.userData.kind; }
+function applyVisibility() {
+  for (const m of Object.values(meshes)) {
+    const k = layerKey(m), d = m.userData.disc;
+    const iso = !isolated || isolated === k || isolated === d;
+    m.visible = iso && !layerOff.has(d) && !layerOff.has(k);
+  }
+  renderLayers();
+}
+function buildLayers() {
+  layerTree = {};
+  for (const m of Object.values(meshes)) {
+    const d = m.userData.disc, k = m.userData.kind;
+    (layerTree[d] ??= {})[k] = ((layerTree[d][k]) || 0) + 1;
+  }
+  open = new Set();
+  renderLayers();
+}
+let layerTree = {}, open = new Set();
+const hex = c => "#" + c.toString(16).padStart(6, "0");
+function renderLayers() {
+  const fileName = d => data.models.find(m => m.disc === d)?.file.replace(/\.ifc$/i, "") || DISC[d].label;
+  const html = [];
+  for (const d of Object.keys(layerTree)) {
+    const cats = Object.entries(layerTree[d]).sort((a, b) => a[0].localeCompare(b[0]));
+    const n = cats.reduce((s, [, c]) => s + c, 0);
+    html.push(`<div class="lyr file ${isolated === d ? "iso" : ""}"><span class="tw" data-open="${d}">${open.has(d) ? "▾" : "▸"}</span>
+      <input type="checkbox" data-k="${d}" ${layerOff.has(d) ? "" : "checked"}><span class="sw" style="background:${hex(DISC[d].color)}"></span>
+      <span class="nm" data-iso="${d}" title="${fileName(d)}">${fileName(d)}</span><span class="ct">${n}</span></div>`);
+    if (open.has(d)) for (const [k, c] of cats) {
+      const key = d + "|" + k;
+      html.push(`<div class="lyr cat ${isolated === key ? "iso" : ""}"><input type="checkbox" data-k="${key}" ${layerOff.has(key) ? "" : "checked"}>
+        <span class="nm" data-iso="${key}">${k}</span><span class="ct">${c}</span></div>`);
+    }
+  }
+  const el = document.getElementById("layers");
+  el.innerHTML = html.join("");
+  el.querySelectorAll("[data-open]").forEach(t => t.onclick = () => { const d = t.dataset.open; open.has(d) ? open.delete(d) : open.add(d); renderLayers(); });
+  el.querySelectorAll("input[data-k]").forEach(i => i.onchange = () => { i.checked ? layerOff.delete(i.dataset.k) : layerOff.add(i.dataset.k); applyVisibility(); });
+  el.querySelectorAll("[data-iso]").forEach(n => n.onclick = () => { isolated = isolated === n.dataset.iso ? null : n.dataset.iso; if (isolated) layerOff.clear(); applyVisibility(); });
+}
+document.getElementById("lyrAll").onclick = () => { isolated = null; layerOff.clear(); applyVisibility(); };
+
+// ---- Section cut: one clipping plane along a chosen axis ----
+const clip = new THREE.Plane();
+let secAxis = "", secFlip = false;
+renderer.localClippingEnabled = false;
+function setSection(ax) {
+  secAxis = ax;
+  document.querySelectorAll("[data-ax]").forEach(b => b.classList.toggle("on", b.dataset.ax === ax));
+  document.getElementById("secPos").disabled = !ax;
+  renderer.clippingPlanes = ax ? [clip] : [];
+  updateSection();
+}
+function updateSection() {
+  const out = document.getElementById("secVal");
+  if (!secAxis || !bounds) { out.textContent = ""; return; }
+  const t = document.getElementById("secPos").value / 1000;
+  const lo = bounds.min[secAxis], hi = bounds.max[secAxis], v = lo + (hi - lo) * t;
+  const n = new THREE.Vector3(); n[secAxis] = secFlip ? 1 : -1;
+  clip.set(n, secFlip ? -v : v);           // keeps the side n·p + c >= 0
+  const ft = (secAxis === "z" ? -v : v) * 3.28084, s = ft < 0 ? "-" : "", a = Math.abs(ft);
+  out.textContent = `${s}${Math.floor(a)}'-${((a % 1) * 12).toFixed(0)}"`;
+}
+document.querySelectorAll("[data-ax]").forEach(b => b.onclick = () => setSection(b.dataset.ax));
+document.getElementById("secPos").oninput = updateSection;
+document.getElementById("secFlip").onclick = e => { secFlip = !secFlip; e.target.classList.toggle("on", secFlip); updateSection(); };
+// Jump the section to the selected clash so it is cut open.
+function sectionAt(p) { if (!secAxis) return; const lo = bounds.min[secAxis], hi = bounds.max[secAxis]; document.getElementById("secPos").value = Math.round(((p[secAxis] - lo) / (hi - lo) + (secFlip ? -.002 : .002)) * 1000); updateSection(); }
 
 function paint() {
   const a = selected && selected.a, parts = new Set(selected ? [selected.b, ...(selected.parts || [])] : []);
@@ -182,9 +276,6 @@ function buildFilters() {
   document.querySelectorAll(".chip").forEach(b => b.onclick = () => { const s = b.dataset.s; filters.sev.has(s) ? filters.sev.delete(s) : filters.sev.add(s); b.classList.toggle("off"); applyFilters(); });
   const types = [...new Set(data.clashes.map(c => c.type))].sort();
   document.getElementById("type").innerHTML = `<option value="">All clash types</option>` + types.map(t => `<option>${t}</option>`).join("");
-  document.getElementById("toggles").innerHTML = Object.keys(groups).map(d =>
-    `<label><input type="checkbox" checked data-d="${d}"><span class="sw" style="background:#${DISC[d].color.toString(16).padStart(6, "0")}"></span>${DISC[d].label}</label>`).join("");
-  document.querySelectorAll("#toggles input").forEach(i => i.onchange = () => groups[i.dataset.d].visible = i.checked);
   document.getElementById("legend").innerHTML = Object.entries(DISC).map(([, v]) => `<div><span class="sw" style="background:#${v.color.toString(16).padStart(6, "0")}"></span>${v.label}</div>`).join("") +
     `<div><span class="sw" style="background:#e8912d"></span>Clash element A</div><div><span class="sw" style="background:#d64045"></span>Clash element B</div>`;
 }
@@ -215,6 +306,7 @@ function select(c) {
   selected = c; paint();
   document.querySelectorAll(".item").forEach(i => i.classList.toggle("sel", c && i.dataset.id === c.id));
   const card = document.getElementById("card");
+  if (!c && bounds) applyVisibility();
   if (!c) { card.style.display = "none"; marker.visible = false; if (home) { controls.target.copy(home.t); camera.position.copy(home.p); } return; }
   const A = data.elements[c.a], B = data.elements[c.b], dn = d => DISC[d]?.label || d;
   document.getElementById("cTitle").textContent = `${c.id} · ${c.severity}`;
@@ -225,6 +317,8 @@ function select(c) {
     <dt style="color:#d64045">B · ${dn(B.disc)}</dt><dd>${B.kind} · ${B.type || B.name}${B.revit_id ? ` <small>(ID ${B.revit_id})</small>` : ""}${c.parts.length > 1 ? ` +${c.parts.length - 1} connected part(s)` : ""}</dd></dl>`;
   card.style.display = "block";
   const p = new THREE.Vector3(...c.point); marker.position.copy(p); marker.visible = true;
+  [c.a, ...c.parts].forEach(g => meshes[g] && (meshes[g].visible = true));
+  sectionAt(p);
   const box = new THREE.Box3(); [c.a, c.b].forEach(g => meshes[g] && box.expandByObject(meshes[g]));
   const r = Math.min(Math.max(box.getSize(new THREE.Vector3()).length() * .5, 1.5), 8);
   const dir = camera.position.clone().sub(controls.target).normalize();
@@ -234,7 +328,7 @@ function select(c) {
 renderer.domElement.addEventListener("dblclick", e => {
   const r = renderer.domElement.getBoundingClientRect(), ray = new THREE.Raycaster();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
-  const hit = ray.intersectObjects(Object.values(groups).filter(g => g.visible), true)[0];
+  const hit = ray.intersectObjects(Object.values(meshes).filter(m => m.visible), false).find(h => !secAxis || clip.distanceToPoint(h.point) >= 0);
   const guid = hit?.object.userData.guid;
   if (!guid) return;
   const c = filtered.find(c => c.a === guid || c.parts.includes(guid)) || data.clashes.find(c => c.a === guid || c.parts.includes(guid));
