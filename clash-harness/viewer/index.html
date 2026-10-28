@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clash Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --navy: #141b3f; --navy-2: #222a55; --green: #00b261; --ink: #333333;
+    --muted: #58595b; --line: #e3e4e8; --bg: #ffffff; --panel: #f6f7f9;
+    --high: #d64045; --medium: #e8912d; --low: #2f80c4; --info: #8a8d96;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { font-family: Inter, Arial, sans-serif; color: var(--ink); background: var(--bg); font-size: 13.5px;
+         display: grid; grid-template-rows: auto 1fr; }
+  header { display: flex; align-items: center; gap: 18px; padding: 14px 24px; border-bottom: 2px solid var(--line); }
+  .mark { width: 34px; height: 34px; border-radius: 7px; background: var(--navy); position: relative; flex: none; }
+  .mark::after { content: ""; position: absolute; right: 5px; top: 5px; width: 13px; height: 24px; background: var(--green); border-radius: 0 4px 4px 0; }
+  .brand { line-height: 1.05; color: var(--navy); }
+  .brand b { display: block; font-size: 17px; font-weight: 600; }
+  .brand span { font-size: 15px; }
+  nav { margin-left: 28px; display: flex; gap: 28px; text-transform: uppercase; font-weight: 600; font-size: 13px; color: var(--muted); }
+  nav .on { color: var(--navy); border-bottom: 2px solid var(--navy); padding-bottom: 14px; margin-bottom: -16px; }
+  .right { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  select, input[type=search] { font: inherit; padding: 7px 10px; border: 1px solid var(--line); border-radius: 0; color: var(--navy); background: #fff; }
+  .btn { font: inherit; font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: .04em; padding: 9px 14px;
+         background: var(--navy); color: #fff; border: 0; cursor: pointer; text-decoration: none; }
+  .btn.green { background: var(--green); }
+  main { display: grid; grid-template-columns: 420px 1fr; min-height: 0; }
+  aside { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; background: var(--panel); }
+  .sect { padding: 14px 18px; border-bottom: 1px solid var(--line); }
+  .eyebrow { font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: #9a9ca3; margin-bottom: 8px; }
+  .chips { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .chip { background: #fff; border: 1px solid var(--line); border-top: 4px solid var(--c); padding: 8px; cursor: pointer; text-align: left; font: inherit; }
+  .chip .n { font-size: 20px; font-weight: 700; color: var(--navy); display: block; }
+  .chip .l { font-size: 11px; text-transform: uppercase; color: var(--muted); letter-spacing: .05em; }
+  .chip.off { opacity: .4; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  .row > * { flex: 1; min-width: 0; }
+  .toggles { display: flex; gap: 14px; flex-wrap: wrap; }
+  .toggles label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .sw { width: 12px; height: 12px; display: inline-block; }
+  #list { overflow: auto; flex: 1; }
+  .item { padding: 11px 18px; border-bottom: 1px solid var(--line); cursor: pointer; background: #fff; border-left: 4px solid var(--c); }
+  .item:hover { background: #f0f6f3; }
+  .item.sel { background: #e6f6ee; outline: 1px solid var(--green); }
+  .item .top { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .item .id { font-weight: 700; color: var(--navy); }
+  .sev { font-weight: 700; text-transform: uppercase; font-size: 11px; color: var(--c); }
+  .item .d { margin-top: 3px; color: var(--ink); }
+  .more { padding: 12px; text-align: center; }
+  #stage { position: relative; min-height: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #card { position: absolute; right: 16px; bottom: 16px; width: 380px; background: #fff; box-shadow: 0 6px 24px rgba(20,27,63,.18);
+          display: none; }
+  #card h3 { margin: 0; padding: 16px 18px; background: var(--navy); color: #fff; font-weight: 600; font-size: 17px; display: flex; justify-content: space-between; }
+  #card .body { padding: 14px 18px; }
+  #card dl { display: grid; grid-template-columns: 92px 1fr; gap: 5px 10px; margin: 10px 0 0; font-size: 12.5px; }
+  #card dt { color: var(--muted); }
+  #card dd { margin: 0; color: var(--navy); word-break: break-word; }
+  .action { margin-top: 10px; padding: 9px 11px; background: #e6f6ee; border-left: 3px solid var(--green); }
+  #legend { position: absolute; left: 16px; top: 16px; background: rgba(255,255,255,.92); padding: 10px 12px; font-size: 12px; }
+  #legend div { display: flex; align-items: center; gap: 7px; margin: 3px 0; }
+  #loading { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(255,255,255,.85); font-weight: 600; color: var(--navy); }
+  .x { cursor: pointer; opacity: .8; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 50vh 1fr; } aside { order: 2; } nav { display: none; } #card { width: auto; left: 16px; } }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="mark"></div>
+  <div class="brand"><b>Team</b><span>Engineering</span></div>
+  <nav><span class="on">Clash Review</span><span>Structural</span><span>MEP</span></nav>
+  <div class="right">
+    <select id="project"></select>
+    <a id="csv" class="btn green" download>Download CSV</a>
+  </div>
+</header>
+<main>
+  <aside>
+    <div class="sect">
+      <div class="eyebrow">Conflicts by severity</div>
+      <div class="chips" id="chips"></div>
+      <div class="row">
+        <select id="type"><option value="">All clash types</option></select>
+        <input id="q" type="search" placeholder="Search level, type, ID…">
+      </div>
+    </div>
+    <div class="sect">
+      <div class="eyebrow">Models</div>
+      <div class="toggles" id="toggles"></div>
+    </div>
+    <div id="list"></div>
+  </aside>
+  <section id="stage">
+    <div id="legend"></div>
+    <div id="card"><h3><span id="cTitle"></span><span class="x" id="cClose">✕</span></h3><div class="body" id="cBody"></div></div>
+    <div id="loading">Loading models…</div>
+  </section>
+</main>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+
+const SEV = { High: "--high", Medium: "--medium", Low: "--low", Info: "--info" };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const DISC = { ARCH: { label: "Architectural", color: 0xc9ccd6 }, STRUCT: { label: "Structural", color: 0x141b3f }, MEP: { label: "MEP", color: 0x00b261 } };
+const HIT_A = 0xe8912d, HIT_B = 0xd64045;
+
+const stage = document.getElementById("stage");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(devicePixelRatio);
+renderer.setClearColor(0xffffff);
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 2000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x8890a8, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(30, 60, 20); scene.add(sun);
+const marker = new THREE.Mesh(new THREE.SphereGeometry(0.12, 24, 16), new THREE.MeshBasicMaterial({ color: HIT_B, depthTest: false }));
+marker.renderOrder = 10; marker.visible = false; scene.add(marker);
+
+function resize() { const r = stage.getBoundingClientRect(); renderer.setSize(r.width, r.height, false); camera.aspect = r.width / r.height; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(stage);
+renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+
+let data, groups = {}, meshes = {}, filtered = [], shown = 200, selected = null;
+const filters = { sev: new Set(["High", "Medium", "Low"]), type: "", q: "" };
+const mats = {};
+function mat(key, color, opacity = 1) {
+  return mats[key] ??= new THREE.MeshStandardMaterial({ color, roughness: .8, metalness: 0, transparent: opacity < 1, opacity, depthWrite: opacity === 1, side: THREE.DoubleSide });
+}
+
+async function loadProject(slug) {
+  document.getElementById("loading").style.display = "grid";
+  Object.values(groups).forEach(g => scene.remove(g)); groups = {}; meshes = {};
+  data = await (await fetch(`data/${slug}.json`)).json();
+  document.getElementById("csv").href = `data/${data.csv}`;
+  const loader = new GLTFLoader();
+  await Promise.all(Object.entries(data.glb).map(async ([d, file]) => {
+    const gltf = await loader.loadAsync(`data/${file}`);
+    gltf.scene.traverse(o => { if (o.isMesh) { o.geometry.deleteAttribute("normal"); o.geometry.computeVertexNormals(); const guid = (o.parent?.name && data.elements[o.parent.name]) ? o.parent.name : o.name; o.userData.guid = guid; o.userData.disc = d; meshes[guid] = o; } });
+    groups[d] = gltf.scene; scene.add(gltf.scene);
+  }));
+  const box = new THREE.Box3(); Object.values(groups).forEach(g => box.expandByObject(g));
+  const c = box.getCenter(new THREE.Vector3()), s = box.getSize(new THREE.Vector3()).length();
+  controls.target.copy(c); camera.position.copy(c).add(new THREE.Vector3(s * .6, s * .45, s * .6));
+  home = { t: c.clone(), p: camera.position.clone() };
+  buildFilters(); select(null); applyFilters();
+  document.getElementById("loading").style.display = "none";
+}
+let home;
+
+function paint() {
+  const a = selected && selected.a, parts = new Set(selected ? [selected.b, ...(selected.parts || [])] : []);
+  for (const [guid, m] of Object.entries(meshes)) {
+    const d = m.userData.disc;
+    if (!selected) m.material = mat(d, DISC[d].color, d === "ARCH" ? .35 : 1);
+    else if (guid === a) m.material = mat("A", HIT_A);
+    else if (parts.has(guid)) m.material = mat("B", HIT_B);
+    else m.material = mat("ghost" + d, DISC[d].color, .05);
+    m.renderOrder = selected && (guid === a || parts.has(guid)) ? 5 : 0;
+  }
+}
+
+function buildFilters() {
+  const counts = { High: 0, Medium: 0, Low: 0, Info: 0 };
+  data.clashes.forEach(c => counts[c.severity]++);
+  document.getElementById("chips").innerHTML = Object.keys(SEV).map(s =>
+    `<button class="chip ${filters.sev.has(s) ? "" : "off"}" data-s="${s}" style="--c:var(${SEV[s]})"><span class="n">${counts[s]}</span><span class="l">${s}</span></button>`).join("");
+  document.querySelectorAll(".chip").forEach(b => b.onclick = () => { const s = b.dataset.s; filters.sev.has(s) ? filters.sev.delete(s) : filters.sev.add(s); b.classList.toggle("off"); applyFilters(); });
+  const types = [...new Set(data.clashes.map(c => c.type))].sort();
+  document.getElementById("type").innerHTML = `<option value="">All clash types</option>` + types.map(t => `<option>${t}</option>`).join("");
+  document.getElementById("toggles").innerHTML = Object.keys(groups).map(d =>
+    `<label><input type="checkbox" checked data-d="${d}"><span class="sw" style="background:#${DISC[d].color.toString(16).padStart(6, "0")}"></span>${DISC[d].label}</label>`).join("");
+  document.querySelectorAll("#toggles input").forEach(i => i.onchange = () => groups[i.dataset.d].visible = i.checked);
+  document.getElementById("legend").innerHTML = Object.entries(DISC).map(([, v]) => `<div><span class="sw" style="background:#${v.color.toString(16).padStart(6, "0")}"></span>${v.label}</div>`).join("") +
+    `<div><span class="sw" style="background:#e8912d"></span>Clash element A</div><div><span class="sw" style="background:#d64045"></span>Clash element B</div>`;
+}
+
+function label(guid) { const e = data.elements[guid]; return e ? `${e.kind}${e.type ? " · " + e.type : ""}` : guid; }
+
+function applyFilters() {
+  const q = filters.q.toLowerCase();
+  filtered = data.clashes.filter(c => filters.sev.has(c.severity) && (!filters.type || c.type === filters.type) &&
+    (!q || `${c.id} ${c.desc} ${c.level} ${c.type} ${label(c.a)} ${label(c.b)}`.toLowerCase().includes(q)));
+  shown = 200; renderList();
+}
+
+function renderList() {
+  const el = document.getElementById("list");
+  el.innerHTML = filtered.slice(0, shown).map(c => `
+    <div class="item ${selected?.id === c.id ? "sel" : ""}" data-id="${c.id}" style="--c:var(${SEV[c.severity]})">
+      <div class="top"><span><span class="id">${c.id}</span> · ${c.level || "No level"}</span><span class="sev">${c.severity}</span></div>
+      <div class="d">${c.desc}</div>
+      <div class="top" style="margin-top:3px"><span>${c.type}</span><span>${c.depth_in}" overlap</span></div>
+    </div>`).join("") + (filtered.length > shown ? `<div class="more"><button class="btn" id="more">Show more (${filtered.length - shown})</button></div>` : "")
+    + (!filtered.length ? `<div class="more">No conflicts match these filters.</div>` : "");
+  el.querySelectorAll(".item").forEach(i => i.onclick = () => select(data.clashes.find(c => c.id === i.dataset.id)));
+  document.getElementById("more")?.addEventListener("click", () => { shown += 200; renderList(); });
+}
+
+function select(c) {
+  selected = c; paint();
+  document.querySelectorAll(".item").forEach(i => i.classList.toggle("sel", c && i.dataset.id === c.id));
+  const card = document.getElementById("card");
+  if (!c) { card.style.display = "none"; marker.visible = false; if (home) { controls.target.copy(home.t); camera.position.copy(home.p); } return; }
+  const A = data.elements[c.a], B = data.elements[c.b], dn = d => DISC[d]?.label || d;
+  document.getElementById("cTitle").textContent = `${c.id} · ${c.severity}`;
+  document.getElementById("cBody").innerHTML = `<div style="font-weight:600;color:var(--navy)">${c.type}</div><div>${c.desc}</div>
+    <div class="action">${c.action}</div>
+    <dl><dt>Level</dt><dd>${c.level || "–"}</dd><dt>Overlap</dt><dd>${c.depth_in}"</dd>
+    <dt style="color:#e8912d">A · ${dn(A.disc)}</dt><dd>${A.kind} · ${A.type || A.name}${A.revit_id ? ` <small>(ID ${A.revit_id})</small>` : ""}</dd>
+    <dt style="color:#d64045">B · ${dn(B.disc)}</dt><dd>${B.kind} · ${B.type || B.name}${B.revit_id ? ` <small>(ID ${B.revit_id})</small>` : ""}${c.parts.length > 1 ? ` +${c.parts.length - 1} connected part(s)` : ""}</dd></dl>`;
+  card.style.display = "block";
+  const p = new THREE.Vector3(...c.point); marker.position.copy(p); marker.visible = true;
+  const box = new THREE.Box3(); [c.a, c.b].forEach(g => meshes[g] && box.expandByObject(meshes[g]));
+  const r = Math.min(Math.max(box.getSize(new THREE.Vector3()).length() * .5, 1.5), 8);
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  controls.target.copy(p); camera.position.copy(p).addScaledVector(dir, r * 2.5);
+}
+
+renderer.domElement.addEventListener("dblclick", e => {
+  const r = renderer.domElement.getBoundingClientRect(), ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = ray.intersectObjects(Object.values(groups).filter(g => g.visible), true)[0];
+  const guid = hit?.object.userData.guid;
+  if (!guid) return;
+  const c = filtered.find(c => c.a === guid || c.parts.includes(guid)) || data.clashes.find(c => c.a === guid || c.parts.includes(guid));
+  if (c) { select(c); document.querySelector(`.item[data-id="${c.id}"]`)?.scrollIntoView({ block: "center" }); }
+});
+document.getElementById("cClose").onclick = () => select(null);
+document.getElementById("type").onchange = e => { filters.type = e.target.value; applyFilters(); };
+document.getElementById("q").oninput = e => { filters.q = e.target.value; applyFilters(); };
+addEventListener("keydown", e => { if (e.key === "Escape") select(null); });
+
+const index = await (await fetch("data/index.json")).json();
+const sel = document.getElementById("project");
+sel.innerHTML = index.map(p => `<option value="${p.slug}">${p.project} (${p.total})</option>`).join("");
+sel.onchange = () => loadProject(sel.value);
+loadProject(index[0].slug);
+</script>
+</body>
+</html>

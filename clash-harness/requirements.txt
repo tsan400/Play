@@ -1,0 +1,5 @@
+ifcopenshell>=0.8
+trimesh>=4
+python-fcl
+rtree
+numpy
